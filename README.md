@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# حسابا
 
-## Getting Started
+نرم‌افزار حسابداری هوشمند فارسی و RTL بر پایهٔ Next.js. محدوده و تصمیم‌های پروژه در پوشهٔ [docs](./docs) ثبت شده‌اند.
 
-First, run the development server:
+## اجرای محلی
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+1. Node.js سازگار با Next.js 16 و npm را نصب کنید.
+2. فایل نمونه را به محیط محلی کپی کنید و مقدار راز احراز هویت را تغییر دهید:
+
+```powershell
+Copy-Item .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+3. وابستگی‌ها و سرور توسعه را اجرا کنید:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. PostgreSQL توسعه‌ای را اجرا کنید:
 
-## Learn More
+```powershell
+docker compose --env-file .env.local up -d postgres
+```
 
-To learn more about Next.js, take a look at the following resources:
+پس از سالم شدن کانتینر، برنامه در `http://localhost:3000` قابل دسترس است. برای توقف سرویس از دستور زیر استفاده کنید؛ داده‌ها در volume پایدار می‌مانند:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```powershell
+docker compose --env-file .env.local down
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+فرمان‌های Prisma که به پایگاه داده متصل می‌شوند داخل کانتینر اجرا می‌شوند تا به محدودیت Schema Engine در Windows وابسته نباشند:
 
-## Deploy on Vercel
+```powershell
+docker compose --env-file .env.local run --rm prisma db pull --print
+docker compose --env-file .env.local run --rm prisma migrate dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## بررسی کیفیت
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run lint
+npm run build
+```
+
+## متغیرهای محیطی
+
+| متغیر | کاربرد |
+|---|---|
+| `POSTGRES_DB` | نام پایگاه دادهٔ توسعه‌ای Docker |
+| `POSTGRES_USER` | کاربر PostgreSQL توسعه‌ای |
+| `POSTGRES_PASSWORD` | گذرواژهٔ محلی PostgreSQL؛ در محیط واقعی مقدار امن انتخاب شود |
+| `DATABASE_URL` | رشتهٔ اتصال PostgreSQL |
+| `BETTER_AUTH_SECRET` | راز نشست و امضای احراز هویت؛ هرگز در Git ثبت نشود |
+| `BETTER_AUTH_URL` | نشانی پایهٔ برنامه |
+| `OLLAMA_BASE_URL` | نشانی سرویس محلی Ollama |
+| `OLLAMA_MODEL` | نام مدل محلی |
+
+فقط `.env.example` در مخزن نگهداری می‌شود؛ `.env.local` و سایر فایل‌های محیطی نادیده گرفته می‌شوند.
