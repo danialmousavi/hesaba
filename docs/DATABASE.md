@@ -12,7 +12,7 @@
 | حوزه | موجودیت‌ها |
 |---|---|
 | هویت | User، Session، Account، Verification، Organization، Membership |
-| مبنای مالی | FiscalYear، AccountingPeriod، Account |
+| مبنای مالی | FiscalYear، AccountingPeriod، LedgerAccount |
 | دفتر روزنامه | JournalEntry، JournalLine، AuditLog |
 | عملیات | FinancialTransaction، Party، Product، Invoice، InvoiceLine، Payment، PaymentAllocation |
 
@@ -36,3 +36,10 @@
 - نام سال مالی در هر سازمان یکتا است و هر سازمان حداکثر یک سال مالی با وضعیت `OPEN` دارد.
 - بازه‌های سال مالی یک سازمان، حتی در صورت بسته بودن سال، نباید با هم هم‌پوشانی داشته باشند؛ روز شروع و پایان هر دو جزو بازه‌اند. این قید در PostgreSQL با `btree_gist` اعمال شده است.
 - وضعیت سال مالی فقط `OPEN` یا `CLOSED` است؛ ثبت‌های مالی در سال بسته در لایهٔ سرویس ممنوع خواهد شد.
+
+## کدینگ حساب‌ها
+
+- `LedgerAccount` از جدول `Account` مربوط به Better Auth جدا است.
+- هر حساب به سازمان تعلق دارد و کد آن در همان سازمان یکتا است.
+- نوع حساب یکی از دارایی، بدهی، سرمایه، درآمد یا هزینه است.
+- حساب‌ها می‌توانند ساختار پدر/فرزند داشته باشند؛ حذف حساب دارای فرزند یا ثبت مالی در آینده مجاز نخواهد بود.

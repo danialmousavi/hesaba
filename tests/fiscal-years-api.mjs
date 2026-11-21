@@ -50,6 +50,9 @@ try {
   assert.equal((await close(foreignYear)).status, 404);
   assert.equal((await close(yearId)).status, 200);
   assert.equal((await close(yearId)).status, 409);
+  const events = await client.query('SELECT type, "actorId" FROM "FiscalYearEvent" WHERE "organizationId" = $1 AND "fiscalYearId" = $2 ORDER BY "createdAt", type', [orgId, yearId]);
+  assert.deepEqual(events.rows.map((event) => event.type).sort(), ["CLOSED", "CREATED"]);
+  assert.ok(events.rows.every((event) => event.actorId === userId));
   assert.equal((await call("POST", { ...valid, name: "Overlapping year" })).status, 409);
   assert.equal((await call("POST", { name: "Second year", startDate: "2027-01-01", endDate: "2027-12-31" })).status, 201);
   console.log("Fiscal year API integration checks passed.");

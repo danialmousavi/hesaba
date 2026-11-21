@@ -21,7 +21,7 @@ async function membership(request: Request) {
   return prisma.membership.findFirst({
     where: { userId: session.user.id },
     orderBy: { createdAt: "asc" },
-    select: { organizationId: true, role: true },
+    select: { organizationId: true, role: true, user: { select: { id: true, name: true } } },
   });
 }
 
@@ -53,7 +53,8 @@ export async function POST(request: Request) {
       select: { id: true },
     });
     if (overlap) return Response.json({ error: "بازهٔ تاریخ با یک سال مالی دیگر هم‌پوشانی دارد." }, { status: 409 });
-    const year = await prisma.fiscalYear.create({
+    const year = await prisma.$transaction(async (tx) => {
+      const year = await tx.fiscalYear.create({
       data: {
         organizationId: member.organizationId,
         name: parsed.data.name,
@@ -61,6 +62,9 @@ export async function POST(request: Request) {
         endDate: new Date(`${parsed.data.endDate}T00:00:00.000Z`),
       },
       select: { id: true, name: true, startDate: true, endDate: true, status: true },
+      });
+      await tx.fiscalYearEvent.create({ data: { organizationId: member.organizationId, fiscalYearId: year.id, actorId: member.user.id, actorName: member.user.name, type: "CREATED", details: { name: year.name, startDate: parsed.data.startDate, endDate: parsed.data.endDate } } });
+      return year;
     });
     return Response.json({ year }, { status: 201 });
   } catch (error) {

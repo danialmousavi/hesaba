@@ -367,6 +367,58 @@
 - **Testing:** migration، تست API و قیود دیتابیس، lint، build و تبدیل نمونه‌های تاریخ شمسی؛ بررسی مرورگر هنوز انجام نشده است.
 - **Status:** DONE
 
+## TASK-028
+
+- **Title:** ثبت رویدادهای ایجاد و بستن سال مالی
+- **Description:** ثبت شناسه و نام کاربر، زمان و جزئیات عملیات در همان تراکنش تغییر سال مالی.
+- **Files:** `prisma/schema.prisma`، `prisma/migrations/20261121160000_fiscal_year_events/`، `app/api/fiscal-years/`، `tests/fiscal-years-api.mjs`
+- **Dependencies:** TASK-027
+- **Acceptance Criteria:** ثبت اتمی و سازمان‌محور رویدادها و عدم ثبت رویداد تکراری هنگام بستن مجدد.
+- **Testing:** migration، تولید کلاینت، آزمون یکپارچه، lint و build.
+- **Status:** DONE
+- **Notes:** تست یکپارچهٔ ایجاد، بستن، نقش‌ها و عدم ثبت رویداد تکراری موفق بود. رویدادهای پیش از این قابلیت قابل بازسازی نیستند؛ این جدول با حذف سازمان حذف می‌شود و هنوز حفاظت append-only در سطح دیتابیس ندارد.
+
+## TASK-029
+
+- **Title:** مدل و قیود بک‌اند کدینگ حساب‌ها
+- **Description:** ایجاد حساب‌های دفتر کل سازمان‌محور با ساختار درختی و پنج نوع اصلی حساب، بدون رابط کاربری.
+- **Files:** `prisma/schema.prisma`، `prisma/migrations/20261121180917_add_ledger_accounts/`، `tests/ledger-accounts-db.mjs`، `docs/DATABASE.md`
+- **Dependencies:** TASK-021
+- **Acceptance Criteria:** کد حساب در سازمان یکتا باشد؛ ساختار پدر/فرزند از حذف والد محافظت کند؛ حساب نتواند والد خودش باشد.
+- **Testing:** migration status، آزمون تراکنشی قیود دیتابیس، lint و production build موفق بودند.
+- **Status:** DONE
+
+## TASK-030
+
+- **Title:** API خواندن و ایجاد کدینگ حساب‌ها
+- **Description:** دریافت فهرست حساب‌های سازمان فعال و ایجاد حساب توسط مدیر با اعتبارسنجی ساختار درختی.
+- **Files:** `app/api/ledger-accounts/route.ts`، `lib/prisma.ts`، `tests/ledger-accounts-api.mjs`
+- **Dependencies:** TASK-029
+- **Acceptance Criteria:** کنترل نشست و نقش، کد یکتا، اعتبار حساب والد و جلوگیری از اتصال به حساب سازمان دیگر.
+- **Testing:** آزمون API با نشست واقعی مدیر و مشاهده‌گر، حساب تکراری، کد نامعتبر و والد خارجی موفق بود.
+- **Status:** DONE
+
+## TASK-031
+
+- **Title:** رابط درخت حساب‌ها
+- **Description:** نمایش حساب‌های سازمان و فرم ایجاد حساب و زیرحساب برای مدیر.
+- **Files:** `app/(app)/dashboard/accounts/`، `app/(app)/dashboard/layout.tsx`
+- **Dependencies:** TASK-030
+- **Acceptance Criteria:** نمایش درخت و وضعیت خالی، انتخاب والد هم‌نوع، و نمایش خطای ثبت.
+- **Testing:** lint و build موفق؛ بررسی بصری مرورگر انجام نشده است.
+- **Status:** DONE
+
+## TASK-032
+
+- **Title:** بک‌اند ویرایش و تغییر وضعیت حساب‌ها
+- **Description:** ویرایش نام و کد و فعال یا غیرفعال کردن حساب توسط مدیر سازمان.
+- **Files:** `app/api/ledger-accounts/`، `tests/ledger-accounts-api.mjs`
+- **Dependencies:** TASK-030
+- **Acceptance Criteria:** کنترل نقش و سازمان، جلوگیری از کد تکراری و حفظ وضعیت سازگار والد و فرزند.
+- **Testing:** آزمون یکپارچهٔ API، lint و build موفق بودند.
+- **Status:** DONE
+- **Notes:** تغییر والد و نوع و همچنین حسابرسی تغییرات در این مرحله پیاده‌سازی نشده‌اند؛ محدودیت‌های سند حسابداری پس از ایجاد آن باید افزوده شوند.
+
 ## TASK-015
 
 - **Title:** استفاده از فونت‌های محلی در رابط کاربر

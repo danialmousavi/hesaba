@@ -18,6 +18,19 @@ enum FiscalYearStatus {
   CLOSED
 }
 
+enum FiscalYearEventType {
+  CREATED
+  CLOSED
+}
+
+enum LedgerAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
 model User {
   id            String       @id @default(cuid())
   name          String
@@ -39,6 +52,41 @@ model Organization {
   updatedAt   DateTime     @updatedAt
   memberships Membership[]
   fiscalYears FiscalYear[]
+  fiscalYearEvents FiscalYearEvent[]
+  ledgerAccounts LedgerAccount[]
+}
+
+model LedgerAccount {
+  id             String            @id @default(cuid())
+  organizationId String
+  parentId       String?
+  code           String
+  name           String
+  type           LedgerAccountType
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent         LedgerAccount?    @relation("LedgerAccountHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children       LedgerAccount[]   @relation("LedgerAccountHierarchy")
+
+  @@unique([organizationId, code])
+  @@index([organizationId, parentId])
+  @@index([organizationId, type, isActive])
+}
+
+model FiscalYearEvent {
+  id             String              @id @default(cuid())
+  organizationId String
+  fiscalYearId   String
+  actorId        String
+  actorName      String
+  type           FiscalYearEventType
+  details        Json
+  createdAt      DateTime            @default(now())
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, fiscalYearId, createdAt])
 }
 
 model FiscalYear {

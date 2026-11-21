@@ -16,9 +16,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   const { id } = await params;
   try {
-    const updated = await prisma.fiscalYear.updateMany({
-      where: { id, organizationId: member.organizationId, status: "OPEN" },
-      data: { status: "CLOSED" },
+    const updated = await prisma.$transaction(async (tx) => {
+      const result = await tx.fiscalYear.updateMany({
+        where: { id, organizationId: member.organizationId, status: "OPEN" },
+        data: { status: "CLOSED" },
+      });
+      if (result.count === 1) await tx.fiscalYearEvent.create({ data: { organizationId: member.organizationId, fiscalYearId: id, actorId: session.user.id, actorName: session.user.name, type: "CLOSED", details: { previousStatus: "OPEN", status: "CLOSED" } } });
+      return result;
     });
     if (updated.count === 1) return Response.json({ status: "CLOSED" });
     const year = await prisma.fiscalYear.findFirst({ where: { id, organizationId: member.organizationId }, select: { id: true } });
