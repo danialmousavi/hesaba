@@ -1,60 +1,62 @@
 # حسابا
 
-نرم‌افزار حسابداری هوشمند فارسی و RTL بر پایهٔ Next.js. محدوده و تصمیم‌های پروژه در پوشهٔ [docs](./docs) ثبت شده‌اند.
+نرم‌افزار حسابداری فارسی و راست‌چین مبتنی بر Next.js و PostgreSQL. وضعیت پیاده‌سازی در [معماری](./docs/ARCHITECTURE.md)، [تسک‌ها](./docs/TASKS.md) و [نقشه راه](./docs/ROADMAP.md) ثبت شده است.
 
-## اجرای محلی
+## اجرای محلی در Windows
 
-1. Node.js سازگار با Next.js 16 و npm را نصب کنید.
-2. فایل نمونه را به محیط محلی کپی کنید و مقدار راز احراز هویت را تغییر دهید:
+دستورها را از پوشه پروژه در PowerShell اجرا کنید. Next.js روی سیستم اجرا می‌شود؛ در نمونه زیر فقط PostgreSQL در Docker است. اگر PostgreSQL محلی دارید، `DATABASE_URL` را با اتصال خودتان هماهنگ کنید.
+
+1. Node.js سازگار با نسخه پروژه، npm و در صورت استفاده از Docker، Docker Desktop را آماده کنید.
+2. فقط اگر `.env.local` را از قبل ندارید، فایل نمونه را کپی کنید:
 
 ```powershell
 Copy-Item .env.example .env.local
 ```
 
-3. وابستگی‌ها و سرور توسعه را اجرا کنید:
+3. در `.env.local` مقدار `BETTER_AUTH_SECRET` را با خروجی دستور زیر جایگزین کنید. راز و فایل محیطی را منتشر نکنید. `BETTER_AUTH_URL` باید نشانی واقعی برنامه باشد.
 
-```bash
-npm install
-npm run dev
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-4. PostgreSQL توسعه‌ای را اجرا کنید:
+4. PostgreSQL نمونه را اجرا کنید و مطمئن شوید آدرس، پورت، نام پایگاه و گذرواژه در `DATABASE_URL` مطابق سرور اجراشده‌اند. Compose نمونه پورت میزبان ۵۴۳۳ را استفاده می‌کند. تغییر متغیر گذرواژه در فایل محیطی، گذرواژه volume از قبل ساخته‌شده را تغییر نمی‌دهد.
 
 ```powershell
 docker compose --env-file .env.local up -d postgres
+docker compose --env-file .env.local exec postgres pg_isready -U postgres -d hesaba
 ```
 
-پس از سالم شدن کانتینر، برنامه در `http://localhost:3000` قابل دسترس است. برای توقف سرویس از دستور زیر استفاده کنید؛ داده‌ها در volume پایدار می‌مانند:
+اگر نام کاربر یا پایگاه را در محیط تغییر داده‌اید، آرگومان‌های دستور بررسی را نیز متناسب با آن تغییر دهید. `pg_isready` پذیرش اتصال را بررسی می‌کند و صحت گذرواژه برنامه را تضمین نمی‌کند.
+
+5. وابستگی‌ها و migrationهای موجود را اعمال و برنامه را اجرا کنید:
 
 ```powershell
-docker compose --env-file .env.local down
+npm ci
+npx prisma generate
+npx prisma migrate deploy
+npm run dev
 ```
 
-فرمان‌های Prisma که به پایگاه داده متصل می‌شوند داخل کانتینر اجرا می‌شوند تا به محدودیت Schema Engine در Windows وابسته نباشند:
+برنامه معمولاً در `http://localhost:3000` باز می‌شود؛ اگر پورت دیگری استفاده شود، پیام ترمینال و `BETTER_AUTH_URL` را بررسی کنید. برای توقف PostgreSQL می‌توانید `docker compose --env-file .env.local down` را اجرا کنید؛ این دستور volume را حذف نمی‌کند.
+
+## تست
 
 ```powershell
-docker compose --env-file .env.local run --rm prisma db pull --print
-docker compose --env-file .env.local run --rm prisma migrate dev
-```
-
-## بررسی کیفیت
-
-```bash
 npm run lint
 npm run build
+node tests/trial-balance-isolated.mjs
+```
+
+آزمون آخر به PostgreSQL و کاربری با مجوز ساخت دیتابیس نیاز دارد؛ یک دیتابیس تصادفی موقت می‌سازد، migrationها را اعمال می‌کند و همان دیتابیس تست را در پایان حذف می‌کند. قبل از اجرای آن باید build موفق وجود داشته باشد. سایر اسکریپت‌های پوشه `tests` نیازها و محدوده متفاوتی دارند؛ پیش از اجرا محتوای آن‌ها را بررسی کنید.
+
+## دادهٔ دمو
+
+`scripts/seed-demo.mjs` دادهٔ مالی نمونه را در سازمانی که شناسه‌اش به آن داده می‌شود ثبت می‌کند و به سال مالی باز نیاز دارد. این دستور داده واقعی می‌نویسد؛ در صورت وجود اسناد نمونه یا کدهای رزروشده متوقف می‌شود. از اجرای دوباره بدون بررسی سازمان و داده‌های موجود خودداری کنید.
+
+```powershell
+node scripts/seed-demo.mjs <organization-id>
 ```
 
 ## متغیرهای محیطی
 
-| متغیر | کاربرد |
-|---|---|
-| `POSTGRES_DB` | نام پایگاه دادهٔ توسعه‌ای Docker |
-| `POSTGRES_USER` | کاربر PostgreSQL توسعه‌ای |
-| `POSTGRES_PASSWORD` | گذرواژهٔ محلی PostgreSQL؛ در محیط واقعی مقدار امن انتخاب شود |
-| `DATABASE_URL` | رشتهٔ اتصال PostgreSQL |
-| `BETTER_AUTH_SECRET` | راز نشست و امضای احراز هویت؛ هرگز در Git ثبت نشود |
-| `BETTER_AUTH_URL` | نشانی پایهٔ برنامه |
-| `OLLAMA_BASE_URL` | نشانی سرویس محلی Ollama |
-| `OLLAMA_MODEL` | نام مدل محلی |
-
-فقط `.env.example` در مخزن نگهداری می‌شود؛ `.env.local` و سایر فایل‌های محیطی نادیده گرفته می‌شوند.
+`POSTGRES_DB`، `POSTGRES_USER` و `POSTGRES_PASSWORD` برای سرویس نمونه Docker هستند؛ `DATABASE_URL` اتصال برنامه و Prisma را مشخص می‌کند. `BETTER_AUTH_SECRET` و `BETTER_AUTH_URL` برای احراز هویت‌اند. `OLLAMA_BASE_URL` و `OLLAMA_MODEL` برای فاز آینده در نظر گرفته شده‌اند؛ اتصال AI هنوز ساخته نشده است. مقادیر نمونه در `.env.example` هستند؛ `.env.local` نباید وارد Git شود.

@@ -36,6 +36,11 @@ enum JournalEntryStatus {
   POSTED
 }
 
+enum ProductType {
+  GOODS
+  SERVICE
+}
+
 model User {
   id            String       @id @default(cuid())
   name          String
@@ -61,6 +66,49 @@ model Organization {
   ledgerAccounts LedgerAccount[]
   journalEntries JournalEntry[]
   journalEvents  JournalEvent[]
+  parties        Party[]
+  products       Product[]
+}
+
+model Product {
+  id             String       @id @default(cuid())
+  organizationId String
+  code           String
+  name           String
+  type           ProductType
+  unit           String
+  salePrice      Decimal      @db.Decimal(20, 0)
+  purchasePrice  Decimal?     @db.Decimal(20, 0)
+  description    String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, code])
+  @@index([organizationId, name])
+  @@index([organizationId, type, isActive])
+}
+
+model Party {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  isCustomer     Boolean      @default(false)
+  isSupplier     Boolean      @default(false)
+  phone          String?
+  email          String?
+  address        String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, name])
+  @@index([organizationId, isCustomer, isActive])
+  @@index([organizationId, isSupplier, isActive])
 }
 
 model JournalEvent {

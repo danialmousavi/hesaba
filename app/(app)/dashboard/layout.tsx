@@ -15,7 +15,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Link href="/dashboard/organization" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">سازمان من</Link>
             <Link href="/dashboard/fiscal-years" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">سال مالی</Link>
             <Link href="/dashboard/accounts" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">کدینگ حساب‌ها</Link>
+            <Link href="/dashboard/parties" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">مشتریان و تأمین‌کنندگان</Link>
             <Link href="/dashboard/journal" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">اسناد حسابداری</Link>
+            <Link href="/dashboard/reports/trial-balance" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">تراز آزمایشی</Link>
+            <Link href="/dashboard/reports/general-ledger" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">دفتر کل</Link>
+            <Link href="/dashboard/reports/profit-loss" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">سود و زیان</Link>
           </nav>
           <div className="hidden px-8 pt-5 text-xs leading-6 text-slate-400 md:block">بخش‌های حسابداری به‌تدریج به این منو اضافه می‌شوند.</div>
         </aside>

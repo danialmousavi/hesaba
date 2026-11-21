@@ -43,11 +43,67 @@ try {
   await db.connect();
   try {
     await db.query('INSERT INTO "Organization" (id,name,slug,"updatedAt") VALUES ($1,$2,$1,now())', [org, "Test"]);
+    const productInsert = 'INSERT INTO "Product" (id,"organizationId",code,name,type,unit,"salePrice","purchasePrice","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())';
+    await db.query(productInsert, [`c${token}prod`, org, "P-1", "Product", "GOODS", "عدد", "99999999999999999999", "0"]);
+    await db.query(productInsert, [`c${token}service`, org, "S-1", "Service", "SERVICE", "ساعت", "0", null]);
+    await assert.rejects(db.query(productInsert, [`c${token}dup`, org, "P-1", "Duplicate", "GOODS", "عدد", "1", null]), { code: "23505" });
+    await assert.rejects(db.query(productInsert, [`c${token}neg`, org, "P-2", "Negative", "GOODS", "عدد", "-1", null]), { code: "23514" });
+    await assert.rejects(db.query(productInsert, [`c${token}neg2`, org, "P-3", "Negative", "GOODS", "عدد", "0", "-1"]), { code: "23514" });
+    await assert.rejects(db.query(productInsert, [`c${token}empty`, org, "P-4", " ", "GOODS", "عدد", "0", null]), { code: "23514" });
+    await assert.rejects(db.query(productInsert, [`c${token}badorg`, "missing-organization", "P-5", "Product", "GOODS", "عدد", "0", null]), { code: "23503" });
+    await db.query('INSERT INTO "Party" (id,"organizationId",name,"isCustomer","isSupplier","updatedAt") VALUES ($1,$2,$3,true,true,now())', [`c${token}p`, org, "Customer and supplier"]);
+    await assert.rejects(db.query('INSERT INTO "Party" (id,"organizationId",name,"updatedAt") VALUES ($1,$2,$3,now())', [`c${token}q`, org, "No role"]), { code: "23514" });
+    await assert.rejects(db.query('INSERT INTO "Party" (id,"organizationId",name,"isCustomer","updatedAt") VALUES ($1,$2,$3,true,now())', [`c${token}r`, org, "  "]), { code: "23514" });
+    await assert.rejects(db.query('INSERT INTO "Party" (id,"organizationId",name,"isCustomer","updatedAt") VALUES ($1,$2,$3,true,now())', [`c${token}s`, "missing-organization", "No organization"]), { code: "23503" });
+    await assert.rejects(db.query('DELETE FROM "Organization" WHERE id=$1', [org]), { code: "23503" });
     await db.query('INSERT INTO "Membership" (id,"userId","organizationId",role,"updatedAt") VALUES ($1,$2,$3,$4,now())', [`c${token}e`, user, org, "ADMIN"]);
     await db.query('INSERT INTO "FiscalYear" (id,"organizationId",name,"startDate","endDate","updatedAt") VALUES ($1,$2,$3,$4,$5,now())', [year, org, "Test", "2026-01-01", "2026-12-31"]);
     for (const [id, code] of [[debitAccount, "100"], [creditAccount, "200"]]) await db.query('INSERT INTO "LedgerAccount" (id,"organizationId",code,name,type,"updatedAt") VALUES ($1,$2,$3,$4,$5,now())', [id, org, code, code, "ASSET"]);
   } finally { await db.end(); }
   const headers = { cookie, origin: base, "content-type": "application/json" };
+  const partiesUrl = `${base}/api/parties`;
+  const partyInput = { name: "  Alice  ", isCustomer: true, isSupplier: false, phone: " 123 ", email: " alice@example.com ", address: "" };
+  assert.equal((await fetch(partiesUrl)).status, 401);
+  assert.equal((await fetch(partiesUrl, { method: "POST", headers: { ...headers, origin: "http://invalid.example" }, body: JSON.stringify(partyInput) })).status, 403);
+  assert.equal((await fetch(partiesUrl, { method: "POST", headers, body: JSON.stringify({ ...partyInput, isCustomer: false }) })).status, 400);
+  assert.equal((await fetch(partiesUrl, { method: "POST", headers, body: JSON.stringify({ ...partyInput, organizationId: "other" }) })).status, 400);
+  assert.equal((await fetch(partiesUrl, { method: "POST", headers, body: JSON.stringify({ ...partyInput, email: "invalid" }) })).status, 400);
+  const createdParty = await fetch(partiesUrl, { method: "POST", headers, body: JSON.stringify(partyInput) });
+  assert.equal(createdParty.status, 201, await createdParty.clone().text());
+  const party = (await createdParty.json()).party;
+  assert.equal(party.name, "Alice"); assert.equal(party.phone, "123"); assert.equal(party.address, null);
+  const partyDb = new pg.Client({ connectionString: testUrl.toString() });
+  await partyDb.connect();
+  try {
+    await partyDb.query('INSERT INTO "Organization" (id,name,slug,"updatedAt") VALUES ($1,$2,$1,now())', [`c${token}other`, "Other"]);
+    await partyDb.query('INSERT INTO "Product" (id,"organizationId",code,name,type,unit,"salePrice","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,now())', [`c${token}otherprod`, `c${token}other`, "P-1", "Other product", "GOODS", "عدد", "10"]);
+    await partyDb.query('INSERT INTO "Party" (id,"organizationId",name,"isCustomer","updatedAt") VALUES ($1,$2,$3,true,now())', [`c${token}outside`, `c${token}other`, "Alice outside"]);
+    const listed = await (await fetch(`${partiesUrl}?search=alice&role=customer`, { headers })).json();
+    assert.equal(listed.total, 1); assert.equal(listed.parties[0].id, party.id);
+    assert.equal((await (await fetch(`${partiesUrl}?role=supplier`, { headers })).json()).total, 1);
+    assert.equal((await fetch(`${partiesUrl}?page=0`, { headers })).status, 400);
+    const patchParty = (id, data, customHeaders = headers) => fetch(`${partiesUrl}/${id}`, { method: "PATCH", headers: customHeaders, body: JSON.stringify(data) });
+    assert.equal((await patchParty(party.id, { name: "Test" }, { ...headers, origin: "http://invalid.example" })).status, 403);
+    assert.equal((await patchParty(`c${token}outside`, { name: "Forbidden" })).status, 404);
+    assert.equal((await patchParty(party.id, {})).status, 400);
+    assert.equal((await patchParty(party.id, { organizationId: `c${token}other` })).status, 400);
+    assert.equal((await patchParty(party.id, { isCustomer: false })).status, 400);
+    assert.equal((await patchParty(party.id, { email: "invalid" })).status, 400);
+    const edited = await patchParty(party.id, { name: "  Alice edited  ", phone: "", isSupplier: true, isActive: false });
+    assert.equal(edited.status, 200, await edited.clone().text());
+    const updatedParty = (await edited.json()).party;
+    assert.equal(updatedParty.name, "Alice edited"); assert.equal(updatedParty.phone, null); assert.equal(updatedParty.email, "alice@example.com"); assert.equal(updatedParty.isActive, false);
+    assert.equal((await (await fetch(`${partiesUrl}?status=inactive`, { headers })).json()).total, 1);
+    assert.equal((await patchParty(party.id, { isCustomer: false, isActive: true })).status, 200);
+    await partyDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["VIEWER", user, org]);
+    assert.equal((await fetch(partiesUrl, { headers })).status, 200);
+    assert.equal((await fetch(partiesUrl, { method: "POST", headers, body: JSON.stringify(partyInput) })).status, 403);
+    assert.equal((await patchParty(party.id, { name: "Forbidden" })).status, 403);
+    await partyDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["ACCOUNTANT", user, org]);
+    assert.equal((await fetch(partiesUrl, { method: "POST", headers, body: JSON.stringify({ ...partyInput, name: "Supplier", isCustomer: false, isSupplier: true }) })).status, 201);
+    assert.equal((await patchParty(party.id, { name: "Accountant edit" })).status, 200);
+    await partyDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["ADMIN", user, org]);
+  } finally { await partyDb.end(); }
   const amount = "99999999999999999999";
   const draft = { fiscalYearId: year, number: 1, date: "2026-06-01", description: "Test", lines: [{ accountId: debitAccount, debit: amount, credit: "0" }, { accountId: creditAccount, debit: "0", credit: amount }] };
   const createdEntry = await fetch(`${base}/api/journal-entries`, { method: "POST", headers, body: JSON.stringify(draft) });
@@ -71,6 +127,67 @@ try {
   assert.equal(result.rows[1].creditBalance, expected);
   assert.equal(result.totals.debit, expected);
   assert.equal(result.totals.credit, expected);
+  const ledgerUrl = `${base}/api/reports/general-ledger?fiscalYearId=${year}&accountId=${debitAccount}`;
+  assert.equal((await fetch(ledgerUrl)).status, 401);
+  const ledger = await fetch(ledgerUrl, { headers });
+  assert.equal(ledger.status, 200, await ledger.clone().text());
+  const ledgerData = await ledger.json();
+  assert.equal(ledgerData.rows.length, 2);
+  assert.equal(ledgerData.rows[0].debitBalance, amount);
+  assert.equal(ledgerData.rows[1].debitBalance, expected);
+  assert.equal(ledgerData.totals.debit, expected);
+  assert.equal(ledgerData.totals.credit, "0");
+  assert.equal((await fetch(`${base}/api/reports/general-ledger?fiscalYearId=${year}&accountId=c${token}x`, { headers })).status, 404);
+  assert.equal((await fetch(`${base}/api/reports/general-ledger?fiscalYearId=invalid&accountId=${debitAccount}`, { headers })).status, 400);
+  const creditLedger = await (await fetch(`${base}/api/reports/general-ledger?fiscalYearId=${year}&accountId=${creditAccount}`, { headers })).json();
+  assert.equal(creditLedger.totals.creditBalance, expected);
+  const revenueAccount = `c${token}f`, expenseAccount = `c${token}g`;
+  const accountsDb = new pg.Client({ connectionString: testUrl.toString() });
+  await accountsDb.connect();
+  try {
+    for (const [accountId, code, type] of [[revenueAccount, "400", "REVENUE"], [expenseAccount, "500", "EXPENSE"]]) await accountsDb.query('INSERT INTO "LedgerAccount" (id,"organizationId",code,name,type,"updatedAt") VALUES ($1,$2,$3,$3,$4,now())', [accountId, org, code, type]);
+  } finally { await accountsDb.end(); }
+  const pnlEntry = await fetch(`${base}/api/journal-entries`, { method: "POST", headers, body: JSON.stringify({ ...draft, number: 4, lines: [{ accountId: debitAccount, debit: "60", credit: "0" }, { accountId: expenseAccount, debit: "40", credit: "0" }, { accountId: revenueAccount, debit: "0", credit: "100" }] }) });
+  assert.equal(pnlEntry.status, 201, await pnlEntry.clone().text());
+  const pnlId = (await pnlEntry.json()).entry.id;
+  assert.equal((await fetch(`${base}/api/journal-entries/${pnlId}/post`, { method: "POST", headers })).status, 200);
+  const pnlUrl = `${base}/api/reports/profit-loss?fiscalYearId=${year}`;
+  assert.equal((await fetch(pnlUrl)).status, 401);
+  const pnlResponse = await fetch(pnlUrl, { headers });
+  assert.equal(pnlResponse.status, 200, await pnlResponse.clone().text());
+  const pnl = await pnlResponse.json();
+  assert.deepEqual(pnl.totals, { revenue: "100", expenses: "40", profit: "60" });
+  assert.equal(pnl.rows.length, 2);
+  const summaryUrl = `${base}/api/dashboard/summary?fiscalYearId=${year}`;
+  assert.equal((await fetch(summaryUrl)).status, 401);
+  const summaryResponse = await fetch(summaryUrl, { headers });
+  assert.equal(summaryResponse.status, 200, await summaryResponse.clone().text());
+  const summary = await summaryResponse.json();
+  assert.deepEqual({ revenue: summary.revenue, expenses: summary.expenses, profit: summary.profit }, pnl.totals);
+  assert.equal(summary.postedCount, 3);
+  assert.equal(summary.draftCount, 1);
+  assert.equal(summary.recentPosted.length, 3);
+  assert.equal((await fetch(`${base}/api/dashboard/summary?fiscalYearId=c${token}x`, { headers })).status, 404);
+  const monthlyUrl = `${base}/api/dashboard/monthly?fiscalYearId=${year}`;
+  assert.equal((await fetch(monthlyUrl)).status, 401);
+  assert.equal((await fetch(`${base}/api/dashboard/monthly?fiscalYearId=invalid`, { headers })).status, 400);
+  assert.equal((await fetch(`${base}/api/dashboard/monthly?fiscalYearId=c${token}x`, { headers })).status, 404);
+  const previousMonth = await fetch(`${base}/api/journal-entries`, { method: "POST", headers, body: JSON.stringify({ ...draft, number: 5, date: "2026-03-20", lines: [{ accountId: debitAccount, debit: "30", credit: "0" }, { accountId: revenueAccount, debit: "0", credit: "30" }] }) });
+  assert.equal(previousMonth.status, 201);
+  assert.equal((await fetch(`${base}/api/journal-entries/${(await previousMonth.json()).entry.id}/post`, { method: "POST", headers })).status, 200);
+  const nextMonth = await fetch(`${base}/api/journal-entries`, { method: "POST", headers, body: JSON.stringify({ ...draft, number: 6, date: "2026-03-21", lines: [{ accountId: expenseAccount, debit: "20", credit: "0" }, { accountId: debitAccount, debit: "0", credit: "20" }] }) });
+  assert.equal(nextMonth.status, 201);
+  assert.equal((await fetch(`${base}/api/journal-entries/${(await nextMonth.json()).entry.id}/post`, { method: "POST", headers })).status, 200);
+  const draftPnl = await fetch(`${base}/api/journal-entries`, { method: "POST", headers, body: JSON.stringify({ ...draft, number: 7, lines: [{ accountId: debitAccount, debit: "900", credit: "0" }, { accountId: revenueAccount, debit: "0", credit: "900" }] }) });
+  assert.equal(draftPnl.status, 201);
+  const monthly = await fetch(monthlyUrl, { headers });
+  assert.equal(monthly.status, 200, await monthly.clone().text());
+  assert.deepEqual((await monthly.json()).months, [
+    { year: 1404, month: 12, revenue: "30", expenses: "0" },
+    { year: 1405, month: 1, revenue: "0", expenses: "20" },
+    { year: 1405, month: 3, revenue: "100", expenses: "40" },
+  ]);
+  assert.equal((await fetch(`${base}/api/reports/profit-loss?fiscalYearId=c${token}x`, { headers })).status, 404);
   console.log("Isolated posting and trial balance checks passed.");
 } finally {
   if (server && server.exitCode === null) { server.kill(); await new Promise((resolve) => server.once("exit", resolve)); }
