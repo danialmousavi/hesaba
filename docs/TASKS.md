@@ -282,7 +282,90 @@
 - **Dependencies:** TASK-019
 - **Acceptance Criteria:** داشبورد نام سازمانی که کاربر عضو آن است را نمایش دهد و عضویت را از سرور بخواند.
 - **Testing:** TypeScript type check، lint و بررسی دستی کاربر عضو سازمان.
-- **Status:** TODO
+- **Status:** DONE
+
+### نتیجه
+
+- داشبورد عضویت کاربر را از سمت سرور همراه با سازمان مرتبط واکشی می‌کند.
+- نام، شناسه، تاریخ ایجاد سازمان و نقش کاربر به فارسی در کارت «فضای کاری فعال» نمایش داده می‌شوند.
+- انتخاب سازمان فعلی قطعی است و بر اساس نخستین عضویت ایجادشده انجام می‌شود.
+
+## TASK-021
+
+- **Title:** مدل و قیود بک‌اند سال مالی
+- **Description:** ایجاد مدل سازمان‌محور سال مالی با وضعیت باز/بسته و قیود داده‌ای لازم، بدون رابط کاربری.
+- **Files:** `prisma/schema.prisma`، `prisma/migrations/`، `docs/DATABASE.md`، `docs/TASKS.md`
+- **Dependencies:** TASK-020
+- **Acceptance Criteria:** سال مالی به سازمان متصل باشد؛ تاریخ پایان پس از شروع باشد؛ هر سازمان حداکثر یک سال مالی باز داشته باشد؛ migration با موفقیت اعمال شود.
+- **Testing:** Prisma generate، migration status و اعتبارسنجی schema.
+- **Status:** DONE
+
+### نتیجه
+
+- مدل `FiscalYear` با اتصال اجباری به سازمان، تاریخ شروع/پایان و وضعیت `OPEN` یا `CLOSED` اضافه شد.
+- migration `20261121133623_add_fiscal_years` اعمال شد و قید بازهٔ تاریخ و index جزئیِ «فقط یک سال مالی باز برای هر سازمان» را در PostgreSQL ایجاد کرد.
+- Prisma Client دوباره تولید شد و schema و migration با پایگاه‌دادهٔ محلی همگام هستند.
+
+## TASK-022
+
+- **Title:** پوستهٔ داشبورد و جابه‌جایی بین صفحات موجود
+- **Description:** ایجاد هدر و سایدبار راست واکنش‌گرا و صفحهٔ اطلاعات سازمان.
+- **Files:** `app/(app)/dashboard/layout.tsx`، `app/(app)/dashboard/page.tsx`، `app/(app)/dashboard/organization/page.tsx`
+- **Dependencies:** TASK-020
+- **Acceptance Criteria:** دسترسی به نمای کلی و اطلاعات سازمان از منو؛ حفظ کنترل دسترسی و سازگاری با موبایل.
+- **Testing:** lint و production build.
+- **Status:** DONE
+
+## TASK-023
+
+- **Title:** API خواندن و ایجاد سال مالی
+- **Description:** خواندن سال‌های سازمان فعال و ایجاد سال مالی توسط مدیر با اعتبارسنجی سمت سرور.
+- **Files:** `app/api/fiscal-years/route.ts`
+- **Dependencies:** TASK-021
+- **Acceptance Criteria:** کنترل session و نقش، محدودسازی به سازمان فعال، اعتبارسنجی تاریخ و مدیریت تعارض.
+- **Testing:** lint، build، آزمون تراکنشی قیود دیتابیس و آزمون API با نشست واقعی مدیر و مشاهده‌گر، ورودی نامعتبر و درخواست بدون نشست یا با مبدأ نامعتبر موفق بودند.
+- **Status:** DONE
+
+## TASK-024
+
+- **Title:** رابط سال مالی
+- **Description:** نمایش سال‌های مالی سازمان و فرم ایجاد برای مدیر از طریق سایدبار داشبورد.
+- **Files:** `app/(app)/dashboard/fiscal-years/`، `app/(app)/dashboard/layout.tsx`
+- **Dependencies:** TASK-023
+- **Acceptance Criteria:** فهرست، وضعیت خالی، فرم و پیام خطا نمایش داده شوند و نقش مدیر رعایت شود.
+- **Testing:** lint و production build موفق؛ بررسی بصری در مرورگر هنوز انجام نشده است.
+- **Status:** DONE
+
+## TASK-025
+
+- **Title:** بک‌اند بستن سال مالی
+- **Description:** بستن اتمی سال باز توسط مدیر سازمان فعال و پاسخ روشن به درخواست تکراری.
+- **Files:** `app/api/fiscal-years/[id]/close/route.ts`، `tests/fiscal-years-api.mjs`
+- **Dependencies:** TASK-023
+- **Acceptance Criteria:** کنترل نشست، نقش و سازمان؛ رد درخواست تکراری و مبدأ نامعتبر.
+- **Testing:** آزمون عملی API برای مدیر، مشاهده‌گر، سازمان دیگر، درخواست تکراری و ایجاد سال جدید پس از بستن موفق بود.
+- **Status:** DONE
+- **Notes:** کنترل اسناد ناتمام و ثبت در گزارش حسابرسی هنوز پیاده‌سازی نشده و پیش از استفادهٔ حسابداری واقعی ضروری است.
+
+## TASK-026
+
+- **Title:** رابط بستن سال مالی
+- **Description:** افزودن دکمه و تأیید صریح بستن سال باز برای مدیر همراه با نمایش محدودیت‌های فعلی.
+- **Files:** `app/(app)/dashboard/fiscal-years/page.tsx`، `app/(app)/dashboard/fiscal-years/close-year-button.tsx`
+- **Dependencies:** TASK-025
+- **Acceptance Criteria:** دکمه فقط برای مدیر و سال باز نمایش یابد؛ خطا و تأیید مشخص باشند؛ پس از موفقیت اطلاعات تازه شوند.
+- **Testing:** lint و production build موفق؛ بررسی بصری و تعامل مرورگر انجام نشده است.
+- **Status:** DONE
+
+## TASK-027
+
+- **Title:** جلوگیری از هم‌پوشانی سال‌های مالی و تقویم شمسی
+- **Description:** قید پایگاه‌داده برای بازه‌های سازمان و انتخاب تاریخ شمسی در فرم.
+- **Files:** `prisma/migrations/20261121150000_fiscal_year_no_overlap/`، `app/api/fiscal-years/route.ts`، `app/(app)/dashboard/fiscal-years/year-form.tsx`، `tests/`، `package.json`
+- **Dependencies:** TASK-026
+- **Acceptance Criteria:** جلوگیری از هم‌پوشانی حتی در درخواست هم‌زمان و انتخاب تاریخ شمسی با تبدیل صحیح برای API.
+- **Testing:** migration، تست API و قیود دیتابیس، lint، build و تبدیل نمونه‌های تاریخ شمسی؛ بررسی مرورگر هنوز انجام نشده است.
+- **Status:** DONE
 
 ## TASK-015
 
