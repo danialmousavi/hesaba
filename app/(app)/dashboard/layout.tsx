@@ -10,12 +10,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Link href="/dashboard" className="font-modam text-2xl font-bold text-emerald-800">حسابا</Link>
             <p className="mt-1 text-xs text-slate-500">فضای کار حسابداری شما</p>
           </div>
-          <nav aria-label="منوی اصلی" className="flex gap-2 overflow-x-auto px-4 pb-4 md:flex-col">
+          <nav aria-label="منوی اصلی" className="flex gap-2 overflow-x-auto px-4 pb-4 md:max-h-[calc(100vh-120px)] md:flex-col md:overflow-y-auto">
             <Link href="/dashboard" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">نمای کلی</Link>
             <Link href="/dashboard/organization" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">سازمان من</Link>
             <Link href="/dashboard/fiscal-years" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">سال مالی</Link>
             <Link href="/dashboard/accounts" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">کدینگ حساب‌ها</Link>
             <Link href="/dashboard/parties" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">مشتریان و تأمین‌کنندگان</Link>
+            <Link href="/dashboard/products" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">کالا و خدمات</Link>
             <Link href="/dashboard/journal" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">اسناد حسابداری</Link>
             <Link href="/dashboard/reports/trial-balance" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">تراز آزمایشی</Link>
             <Link href="/dashboard/reports/general-ledger" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">دفتر کل</Link>

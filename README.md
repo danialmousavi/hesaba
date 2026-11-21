@@ -39,6 +39,8 @@ npm run dev
 
 برنامه معمولاً در `http://localhost:3000` باز می‌شود؛ اگر پورت دیگری استفاده شود، پیام ترمینال و `BETTER_AUTH_URL` را بررسی کنید. برای توقف PostgreSQL می‌توانید `docker compose --env-file .env.local down` را اجرا کنید؛ این دستور volume را حذف نمی‌کند.
 
+اگر پس از تغییر مدل Prisma خطایی مانند ناشناخته بودن مدل یا `Cannot read properties of undefined (reading 'findMany')` دیدید، سرور توسعه را با `Ctrl+C` متوقف کنید، `npx prisma generate` و در صورت وجود migration جدید `npx prisma migrate deploy` را اجرا کنید، سپس `npm run dev` را دوباره اجرا کنید.
+
 ## تست
 
 ```powershell

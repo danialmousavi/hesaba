@@ -77,6 +77,24 @@ try {
   try {
     await partyDb.query('INSERT INTO "Organization" (id,name,slug,"updatedAt") VALUES ($1,$2,$1,now())', [`c${token}other`, "Other"]);
     await partyDb.query('INSERT INTO "Product" (id,"organizationId",code,name,type,unit,"salePrice","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,now())', [`c${token}otherprod`, `c${token}other`, "P-1", "Other product", "GOODS", "عدد", "10"]);
+    const productsUrl = `${base}/api/products`;
+    const productInput = { code: " NEW ", name: "  New service  ", type: "SERVICE", unit: " ساعت ", salePrice: "99999999999999999999", purchasePrice: "0", description: " " };
+    const createProduct = (data, customHeaders = headers) => fetch(productsUrl, { method: "POST", headers: customHeaders, body: JSON.stringify(data) });
+    assert.equal((await fetch(productsUrl)).status, 401);
+    assert.equal((await createProduct(productInput, { ...headers, origin: "http://invalid.example" })).status, 403);
+    for (const value of [-1, -1.5, "-1", "1.1", "100000000000000000000"]) assert.equal((await createProduct({ ...productInput, salePrice: value })).status, 400);
+    assert.equal((await createProduct({ ...productInput, organizationId: `c${token}other` })).status, 400);
+    assert.equal((await createProduct({ ...productInput, code: "P-1" })).status, 409);
+    const createdProduct = await createProduct(productInput);
+    assert.equal(createdProduct.status, 201, await createdProduct.clone().text());
+    const product = (await createdProduct.json()).product;
+    assert.equal(product.code, "NEW"); assert.equal(product.name, "New service"); assert.equal(product.salePrice, "99999999999999999999"); assert.equal(product.purchasePrice, "0"); assert.equal(product.description, null);
+    const listedProducts = await fetch(`${productsUrl}?search=product&type=goods`, { headers });
+    assert.equal(listedProducts.status, 200);
+    const productList = await listedProducts.json();
+    assert.equal(productList.total, 1); assert.equal(productList.products[0].id, `c${token}prod`); assert.equal(productList.products[0].salePrice, "99999999999999999999");
+    assert.equal((await (await fetch(`${productsUrl}?type=service&pageSize=1`, { headers })).json()).total, 2);
+    assert.equal((await fetch(`${productsUrl}?pageSize=101`, { headers })).status, 400);
     await partyDb.query('INSERT INTO "Party" (id,"organizationId",name,"isCustomer","updatedAt") VALUES ($1,$2,$3,true,now())', [`c${token}outside`, `c${token}other`, "Alice outside"]);
     const listed = await (await fetch(`${partiesUrl}?search=alice&role=customer`, { headers })).json();
     assert.equal(listed.total, 1); assert.equal(listed.parties[0].id, party.id);
@@ -96,10 +114,13 @@ try {
     assert.equal((await (await fetch(`${partiesUrl}?status=inactive`, { headers })).json()).total, 1);
     assert.equal((await patchParty(party.id, { isCustomer: false, isActive: true })).status, 200);
     await partyDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["VIEWER", user, org]);
+    assert.equal((await fetch(productsUrl, { headers })).status, 200);
+    assert.equal((await createProduct({ ...productInput, code: "VIEWER" })).status, 403);
     assert.equal((await fetch(partiesUrl, { headers })).status, 200);
     assert.equal((await fetch(partiesUrl, { method: "POST", headers, body: JSON.stringify(partyInput) })).status, 403);
     assert.equal((await patchParty(party.id, { name: "Forbidden" })).status, 403);
     await partyDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["ACCOUNTANT", user, org]);
+    assert.equal((await createProduct({ ...productInput, code: "ACCOUNTANT", salePrice: "0", purchasePrice: null })).status, 201);
     assert.equal((await fetch(partiesUrl, { method: "POST", headers, body: JSON.stringify({ ...partyInput, name: "Supplier", isCustomer: false, isSupplier: true }) })).status, 201);
     assert.equal((await patchParty(party.id, { name: "Accountant edit" })).status, 200);
     await partyDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["ADMIN", user, org]);
