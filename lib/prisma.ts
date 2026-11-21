@@ -21,7 +21,7 @@ function createPrismaClient() {
 
 // A dev server can retain an older client after `prisma generate` adds a model.
 const cachedPrisma = globalForPrisma.prisma;
-export const prisma = cachedPrisma && "fiscalYearEvent" in cachedPrisma && "ledgerAccount" in cachedPrisma
+export const prisma = cachedPrisma && "fiscalYearEvent" in cachedPrisma && "ledgerAccount" in cachedPrisma && "journalEntry" in cachedPrisma && "journalEvent" in cachedPrisma
   ? cachedPrisma
   : createPrismaClient();
 

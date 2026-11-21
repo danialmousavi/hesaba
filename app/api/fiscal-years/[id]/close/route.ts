@@ -16,19 +16,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   const { id } = await params;
   try {
-    const updated = await prisma.$transaction(async (tx) => {
-      const result = await tx.fiscalYear.updateMany({
-        where: { id, organizationId: member.organizationId, status: "OPEN" },
-        data: { status: "CLOSED" },
-      });
-      if (result.count === 1) await tx.fiscalYearEvent.create({ data: { organizationId: member.organizationId, fiscalYearId: id, actorId: session.user.id, actorName: session.user.name, type: "CLOSED", details: { previousStatus: "OPEN", status: "CLOSED" } } });
-      return result;
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${id} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
+      const year = await tx.fiscalYear.findFirst({ where: { id, organizationId: member.organizationId }, select: { status: true } });
+      if (!year) return { status: 404, error: "سال مالی پیدا نشد." } as const;
+      if (year.status !== "OPEN") return { status: 409, error: "این سال مالی قبلاً بسته شده است." } as const;
+      const drafts = await tx.journalEntry.count({ where: { organizationId: member.organizationId, fiscalYearId: id, status: "DRAFT" } });
+      if (drafts > 0) return { status: 409, error: `این سال مالی ${drafts.toLocaleString("fa-IR")} سند پیش‌نویس دارد؛ ابتدا وضعیت آن‌ها را تعیین کنید.` } as const;
+      await tx.fiscalYear.update({ where: { id }, data: { status: "CLOSED" } });
+      await tx.fiscalYearEvent.create({ data: { organizationId: member.organizationId, fiscalYearId: id, actorId: session.user.id, actorName: session.user.name, type: "CLOSED", details: { previousStatus: "OPEN", status: "CLOSED" } } });
+      return { status: 200 } as const;
     });
-    if (updated.count === 1) return Response.json({ status: "CLOSED" });
-    const year = await prisma.fiscalYear.findFirst({ where: { id, organizationId: member.organizationId }, select: { id: true } });
-    return year
-      ? Response.json({ error: "این سال مالی قبلاً بسته شده است." }, { status: 409 })
-      : Response.json({ error: "سال مالی پیدا نشد." }, { status: 404 });
+    if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
+    return Response.json({ status: "CLOSED" });
   } catch (error) {
     console.error("Fiscal year closing failed", error);
     return Response.json({ error: "بستن سال مالی انجام نشد." }, { status: 500 });

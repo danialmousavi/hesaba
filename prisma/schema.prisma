@@ -31,6 +31,11 @@ enum LedgerAccountType {
   EXPENSE
 }
 
+enum JournalEntryStatus {
+  DRAFT
+  POSTED
+}
+
 model User {
   id            String       @id @default(cuid())
   name          String
@@ -54,6 +59,22 @@ model Organization {
   fiscalYears FiscalYear[]
   fiscalYearEvents FiscalYearEvent[]
   ledgerAccounts LedgerAccount[]
+  journalEntries JournalEntry[]
+  journalEvents  JournalEvent[]
+}
+
+model JournalEvent {
+  id             String       @id @default(cuid())
+  organizationId String
+  entryId        String
+  actorId        String
+  actorName      String
+  action         String
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  entry          JournalEntry @relation(fields: [organizationId, entryId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, entryId, createdAt])
 }
 
 model LedgerAccount {
@@ -69,8 +90,10 @@ model LedgerAccount {
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   parent         LedgerAccount?    @relation("LedgerAccountHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
   children       LedgerAccount[]   @relation("LedgerAccountHierarchy")
+  journalLines   JournalLine[]
 
   @@unique([organizationId, code])
+  @@unique([organizationId, id])
   @@index([organizationId, parentId])
   @@index([organizationId, type, isActive])
 }
@@ -99,10 +122,47 @@ model FiscalYear {
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
   organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  journalEntries JournalEntry[]
 
   @@unique([organizationId, name])
+  @@unique([organizationId, id])
   @@index([organizationId, status])
   @@index([organizationId, startDate])
+}
+
+model JournalEntry {
+  id             String             @id @default(cuid())
+  organizationId String
+  fiscalYearId   String
+  number         Int
+  date           DateTime           @db.Date
+  description    String
+  status         JournalEntryStatus @default(DRAFT)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fiscalYear     FiscalYear         @relation(fields: [organizationId, fiscalYearId], references: [organizationId, id], onDelete: Restrict)
+  lines          JournalLine[]
+  events         JournalEvent[]
+
+  @@unique([organizationId, fiscalYearId, number])
+  @@unique([organizationId, id])
+  @@index([organizationId, date])
+}
+
+model JournalLine {
+  id             String        @id @default(cuid())
+  organizationId String
+  entryId        String
+  accountId      String
+  description    String?
+  debit          Decimal       @default(0) @db.Decimal(20, 0)
+  credit         Decimal       @default(0) @db.Decimal(20, 0)
+  entry          JournalEntry  @relation(fields: [organizationId, entryId], references: [organizationId, id], onDelete: Restrict)
+  account        LedgerAccount @relation(fields: [organizationId, accountId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, entryId])
+  @@index([organizationId, accountId])
 }
 
 model Membership {

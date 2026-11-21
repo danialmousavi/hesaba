@@ -419,6 +419,144 @@
 - **Status:** DONE
 - **Notes:** تغییر والد و نوع و همچنین حسابرسی تغییرات در این مرحله پیاده‌سازی نشده‌اند؛ محدودیت‌های سند حسابداری پس از ایجاد آن باید افزوده شوند.
 
+## TASK-033
+
+- **Title:** رابط ویرایش و تغییر وضعیت حساب
+- **Description:** افزودن کنترل‌های ویرایش نام و کد و فعال/غیرفعال‌کردن حساب در درخت حساب‌ها برای مدیر.
+- **Files:** `app/(app)/dashboard/accounts/page.tsx`، `app/(app)/dashboard/accounts/account-controls.tsx`
+- **Dependencies:** TASK-032
+- **Acceptance Criteria:** نمایش کنترل‌ها فقط به مدیر، تأیید تغییر وضعیت، نمایش خطا و تازه‌سازی فهرست پس از موفقیت.
+- **Testing:** lint، build و آزمون API موفق بودند؛ بررسی تعامل در مرورگر انجام نشده است.
+- **Status:** DONE
+
+## TASK-034
+
+- **Title:** مدل پایهٔ سند و ردیف حسابداری
+- **Description:** مدل سازمان‌محور سند و ردیف با مبلغ دقیق، شمارهٔ یکتا و اتصال هم‌سازمان به حساب و سال مالی.
+- **Files:** `prisma/schema.prisma`، `prisma/migrations/20261121190000_add_journal_entries/`، `tests/journal-db.mjs`، `docs/DATABASE.md`
+- **Dependencies:** TASK-030
+- **Acceptance Criteria:** migration اعمال شود و قیود مبلغ و جداسازی سازمان در دیتابیس آزموده شوند.
+- **Testing:** migration، تولید Prisma Client، تست تراکنشی دیتابیس و lint.
+- **Status:** DONE
+- **Notes:** API ثبت و کنترل تراز، منع تغییر سند نهایی و کنترل سال بسته هنوز ساخته نشده‌اند.
+
+## TASK-035
+
+- **Title:** API ایجاد و فهرست پیش‌نویس اسناد
+- **Description:** ایجاد سند پیش‌نویس سازمان‌محور توسط مدیر یا حسابدار، با اعتبارسنجی مبلغ و سال مالی باز.
+- **Files:** `app/api/journal-entries/route.ts`، `lib/prisma.ts`، `tests/journal-api.mjs`
+- **Dependencies:** TASK-034
+- **Acceptance Criteria:** کنترل نقش، سال باز، تاریخ، حساب‌های فعال سازمان، شمارهٔ یکتا و مبلغ دقیق؛ ثبت سند و ردیف‌ها اتمی باشد.
+- **Testing:** آزمون API، lint و build.
+- **Status:** DONE
+- **Notes:** پیش‌نویس می‌تواند نامتوازن باشد؛ نهایی‌سازی و کنترل تراز هنوز پیاده نشده است.
+
+## TASK-036
+
+- **Title:** رابط پیش‌نویس اسناد حسابداری
+- **Description:** نمایش اسناد سازمان و فرم پیش‌نویس با تاریخ شمسی و ردیف‌های بدهکار/بستانکار.
+- **Files:** `app/(app)/dashboard/journal/`، `app/(app)/dashboard/layout.tsx`
+- **Dependencies:** TASK-035
+- **Acceptance Criteria:** نمایش وضعیت و جزئیات سند، ایجاد پیش‌نویس توسط نقش مجاز، محاسبهٔ دقیق جمع‌ها و نمایش خطا.
+- **Testing:** lint، build و آزمون API موفق؛ بررسی تعامل مرورگر انجام نشده است.
+- **Status:** DONE
+
+## TASK-037
+
+- **Title:** بک‌اند ثبت نهایی سند حسابداری
+- **Description:** نهایی‌سازی اتمی سند متوازن در سال مالی باز با حساب‌های فعال و ثبت رویداد.
+- **Files:** `app/api/journal-entries/[id]/post/route.ts`، `prisma/schema.prisma`، `prisma/migrations/20261121200000_journal_events/`، `tests/journal-api.mjs`
+- **Dependencies:** TASK-035
+- **Acceptance Criteria:** حداقل دو ردیف، جمع برابر و مثبت، نقش مجاز، سال باز، حساب‌های فعال، جلوگیری از ثبت تکراری و ثبت رویداد.
+- **Testing:** آزمون یکپارچهٔ API، lint و build موفق.
+- **Status:** DONE
+- **Notes:** محافظت تغییرناپذیری در سطح دیتابیس، کنترل اسناد ناتمام در بستن سال و امکان اصلاح/برگشت سند هنوز پیاده نشده‌اند.
+
+## TASK-038
+
+- **Title:** رابط ثبت نهایی سند
+- **Description:** افزودن کنترل ثبت نهایی پیش‌نویس با تأیید صریح و نمایش خطای سرور.
+- **Files:** `app/(app)/dashboard/journal/page.tsx`، `app/(app)/dashboard/journal/post-journal-button.tsx`
+- **Dependencies:** TASK-037
+- **Acceptance Criteria:** نمایش کنترل فقط به مدیر یا حسابدار برای پیش‌نویس؛ تأیید، خطا و تازه‌سازی وضعیت.
+- **Testing:** lint، build و آزمون API موفق؛ تعامل بصری مرورگر بررسی نشده است.
+- **Status:** DONE
+
+## TASK-039
+
+- **Title:** محافظت سند ثبت‌شده در پایگاه داده
+- **Description:** جلوگیری از ویرایش و حذف سند نهایی و تغییر ردیف‌های آن در PostgreSQL.
+- **Files:** `prisma/migrations/20261121210000_lock_posted_journals/`، `tests/journal-db.mjs`، `tests/journal-api.mjs`، `docs/DATABASE.md`
+- **Dependencies:** TASK-037
+- **Acceptance Criteria:** رد ویرایش/حذف سند نهایی و افزودن/ویرایش/حذف ردیف‌های آن؛ محافظت از داده‌های تست با rollback.
+- **Testing:** تست تراکنشی دیتابیس، آزمون API پیش‌نویس و lint موفق.
+- **Status:** DONE
+- **Notes:** آزمون موفق نهایی‌سازی API برای پاکسازی ایمن اکنون به دیتابیس موقت مجزا نیاز دارد. ثبت مستقیم وضعیت در دیتابیس و دسترسی مدیریتی از محدودهٔ این محافظت خارج‌اند.
+
+## TASK-040
+
+- **Title:** جلوگیری از بستن سال دارای پیش‌نویس
+- **Description:** بررسی پیش‌نویس‌های سازمان در تراکنش بستن سال مالی با قفل مشترک با عملیات ثبت سند.
+- **Files:** `app/api/fiscal-years/[id]/close/route.ts`، `tests/journal-api.mjs`، `app/(app)/dashboard/fiscal-years/close-year-button.tsx`
+- **Dependencies:** TASK-035، TASK-039
+- **Acceptance Criteria:** بستن سال دارای پیش‌نویس رد و سال بدون پیش‌نویس طبق مجوز بسته شود.
+- **Testing:** آزمون‌های API سال مالی و سند، lint و build موفق؛ آزمون هم‌زمانی اجرا نشده است.
+- **Status:** DONE
+- **Notes:** پیش‌نویس نامتوازن تا افزودن امکان ویرایش یا حذف قابل تعیین تکلیف نیست؛ سایر کنترل‌های پایان سال هنوز تکمیل نشده‌اند.
+
+## TASK-041
+
+- **Title:** بک‌اند ویرایش پیش‌نویس سند
+- **Description:** ویرایش اتمی شماره، تاریخ، شرح و ردیف‌های سند پیش‌نویس با کنترل سازمان و سال مالی.
+- **Files:** `app/api/journal-entries/[id]/route.ts`، `tests/journal-api.mjs`
+- **Dependencies:** TASK-040
+- **Acceptance Criteria:** فقط نقش مجاز در سال باز بتواند پیش‌نویس را با حساب‌های فعال ویرایش کند؛ سند نهایی قابل ویرایش نباشد.
+- **Testing:** آزمون API، lint و build موفق؛ تست تغییر هم‌زمان و تست ویرایش سند نهایی در دیتابیس مجزای آزمایشی باقی است.
+- **Status:** DONE
+- **Notes:** رابط ویرایش هنوز ساخته نشده و تغییر سال مالی سند در این API مجاز نیست.
+
+## TASK-042
+
+- **Title:** رابط ویرایش پیش‌نویس سند
+- **Description:** بارگذاری و اصلاح شماره، تاریخ شمسی، شرح و ردیف‌های سند پیش‌نویس.
+- **Files:** `app/(app)/dashboard/journal/[id]/edit/page.tsx`، `app/(app)/dashboard/journal/journal-form.tsx`، `app/(app)/dashboard/journal/page.tsx`
+- **Dependencies:** TASK-041
+- **Acceptance Criteria:** نمایش فرم فقط برای کاربر مجاز و سند پیش‌نویس در سال باز، نمایش داده‌های قبلی و ارسال اصلاحات به API.
+- **Testing:** lint، build و آزمون API موفق؛ بررسی بصری و تعامل مرورگر انجام نشده است.
+- **Status:** DONE
+
+## TASK-043
+
+- **Title:** بک‌اند حذف پیش‌نویس سند
+- **Description:** حذف اتمی پیش‌نویس و ردیف‌های آن در سال مالی باز توسط نقش مجاز.
+- **Files:** `app/api/journal-entries/[id]/route.ts`، `tests/journal-api.mjs`
+- **Dependencies:** TASK-041
+- **Acceptance Criteria:** کنترل نقش، سازمان و وضعیت؛ حفاظت از سند نهایی و سال بسته و حذف اتمی ردیف‌ها.
+- **Testing:** آزمون API و قیود دیتابیس، lint و build موفق؛ تست هم‌زمانی اجرا نشده است.
+- **Status:** DONE
+- **Notes:** حذف پیش‌نویس دائمی است و شمارهٔ آن قابل استفادهٔ مجدد می‌شود؛ تاریخچهٔ حذف ثبت نمی‌شود. رابط کاربری هنوز اضافه نشده است.
+
+## TASK-044
+
+- **Title:** رابط حذف پیش‌نویس سند
+- **Description:** نمایش دکمهٔ حذف پیش‌نویس در سال باز برای کاربر مجاز، با تأیید و هشدار حذف دائمی.
+- **Files:** `app/(app)/dashboard/journal/page.tsx`، `app/(app)/dashboard/journal/delete-draft-button.tsx`
+- **Dependencies:** TASK-043
+- **Acceptance Criteria:** تأیید صریح، نمایش خطا، جلوگیری از ارسال تکراری و تازه‌سازی فهرست پس از حذف.
+- **Testing:** lint، build و آزمون API موفق؛ تعامل مرورگر بررسی نشده است.
+- **Status:** DONE
+
+## TASK-045
+
+- **Title:** بک‌اند گزارش تراز آزمایشی
+- **Description:** محاسبهٔ گردش و ماندهٔ مستقیم حساب‌ها از اسناد نهایی یک سازمان و سال مالی.
+- **Files:** `app/api/reports/trial-balance/route.ts`، `tests/journal-api.mjs`
+- **Dependencies:** TASK-037
+- **Acceptance Criteria:** جداسازی سازمان، حذف پیش‌نویس‌ها از گزارش و محاسبهٔ دقیق ریالی.
+- **Testing:** lint، build، کنترل دسترسی، کنارگذاشتن پیش‌نویس و محاسبه با دو سند نهایی و مبالغ بزرگ در دیتابیس مجزا موفق بودند.
+- **Status:** DONE
+- **Notes:** حساب‌های بدون گردش نمایش داده نمی‌شوند؛ گردش زیرحساب به والد تجمیع نمی‌شود. دیتابیس موقت آزمایشی پس از آزمون حذف شد.
+
 ## TASK-015
 
 - **Title:** استفاده از فونت‌های محلی در رابط کاربر
