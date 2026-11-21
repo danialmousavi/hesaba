@@ -185,4 +185,132 @@
 - **Dependencies:** TASK-011
 - **Acceptance Criteria:** client فقط در ماژول‌های Client Component قابل استفاده باشد و به مسیر پیش‌فرض `/api/auth` متصل شود.
 - **Testing:** TypeScript type check و بررسی import در یک Client Component آزمایشی بدون تغییر رابط اصلی.
+- **Status:** DONE
+
+### نتیجه
+
+- SDK سمت‌کلاینت Better Auth در `lib/auth-client.ts` ایجاد شد.
+- با directive `"use client"` فقط برای Client Componentها بسته‌بندی می‌شود.
+- بدون پیکربندی مسیر اختصاصی، از مسیر پیش‌فرض `/api/auth` در مبدأ فعلی استفاده می‌کند.
+
+## TASK-013
+
+- **Title:** ایجاد صفحه و فرم ثبت‌نام
+- **Description:** ایجاد یک صفحهٔ عمومی فارسی و راست‌به‌چپ برای ثبت‌نام با ایمیل و رمز عبور، با استفاده از Better Auth Client.
+- **Files:** `app/(auth)/sign-up/page.tsx`، `docs/TASKS.md`
+- **Dependencies:** TASK-012
+- **Acceptance Criteria:** کاربر بتواند نام، ایمیل و رمز عبور را وارد کند؛ درخواست از طریق `authClient.signUp.email` ارسال شود؛ خطا و وضعیت ارسال برای کاربر نمایش داده شود.
+- **Testing:** TypeScript type check، lint و بررسی دستی صفحه در توسعه.
+- **Status:** DONE
+
+### نتیجه
+
+- صفحهٔ عمومی و راست‌به‌چپ ثبت‌نام در مسیر `/sign-up` ایجاد شد.
+- فرم با `authClient.signUp.email` به Better Auth متصل است و نام، ایمیل و رمز عبور را ارسال می‌کند.
+- اعتبارسنجی پایه، حالت در حال ارسال و پیام قابل‌دسترس موفقیت یا خطا افزوده شد.
+- پیام خطای دقیق Better Auth از payload پاسخ استخراج و نمایش داده می‌شود.
+
+## TASK-014
+
+- **Title:** ایجاد صفحه و فرم ورود
+- **Description:** ایجاد صفحهٔ عمومی فارسی برای ورود با ایمیل و رمز عبور و اتصال آن به Better Auth Client.
+- **Files:** `app/(auth)/sign-in/page.tsx`، `docs/TASKS.md`
+- **Dependencies:** TASK-013
+- **Acceptance Criteria:** کاربر بتواند با ایمیل و رمز عبور وارد شود؛ درخواست از طریق `authClient.signIn.email` ارسال شود؛ خطا و وضعیت ارسال به کاربر نشان داده شود.
+- **Testing:** TypeScript type check، lint و بررسی دستی صفحه در توسعه.
+- **Status:** DONE
+
+### نتیجه
+
+- صفحهٔ عمومی و راست‌به‌چپ ورود در مسیر `/sign-in` ایجاد شد.
+- فرم با `authClient.signIn.email` به Better Auth متصل است و ایمیل و رمز عبور را ارسال می‌کند.
+- حالت ارسال، پیام خطا یا موفقیت و مسیرهای رفت‌وبرگشت ورود/ثبت‌نام افزوده شدند.
+
+## TASK-017
+
+- **Title:** محافظت از مسیر برنامه پس از ورود
+- **Description:** ایجاد مسیر اولیهٔ برنامه و کنترل session تا فقط کاربر واردشده به آن دسترسی داشته باشد.
+- **Files:** `app/(app)/dashboard/page.tsx`، `app/(auth)/sign-in/page.tsx`، `docs/TASKS.md`
+- **Dependencies:** TASK-014
+- **Acceptance Criteria:** کاربر ناشناس به صفحهٔ ورود هدایت شود و کاربر واردشده صفحهٔ اولیهٔ برنامه را ببیند.
+- **Testing:** بررسی دستی دو وضعیت session و TypeScript type check.
+- **Status:** DONE
+
+### نتیجه
+
+- مسیر محافظت‌شدهٔ `/dashboard` ایجاد شد و session را در سرور با Better Auth بررسی می‌کند.
+- کاربر ناشناس به `/sign-in` هدایت می‌شود و کاربر واردشده پیام خوش‌آمد و نام خود را می‌بیند.
+- پس از ورود موفق، فرم ورود کاربر را به `/dashboard` منتقل می‌کند.
+
+## TASK-018
+
+- **Title:** افزودن خروج امن از حساب
+- **Description:** افزودن کنترل خروج در داشبورد با Better Auth Client و بازگرداندن کاربر به صفحهٔ ورود.
+- **Files:** `app/(app)/dashboard/page.tsx`، `app/(app)/dashboard/sign-out-button.tsx`، `docs/TASKS.md`
+- **Dependencies:** TASK-017
+- **Acceptance Criteria:** کاربر واردشده بتواند session را پایان دهد و پس از خروج به `/sign-in` منتقل شود.
+- **Testing:** TypeScript type check، lint و بررسی دستی session پس از خروج.
+- **Status:** DONE
+
+### نتیجه
+
+- دکمهٔ خروج سمت‌کلاینت به داشبورد افزوده شد.
+- خروج از طریق `authClient.signOut` انجام می‌شود و کاربر سپس به `/sign-in` منتقل می‌شود.
+
+## TASK-019
+
+- **Title:** ایجاد سازمان اولیه پس از ثبت‌نام
+- **Description:** تعریف جریان ایجاد نخستین سازمان کاربر و عضویت او با نقش مدیر، پس از تکمیل ثبت‌نام.
+- **Files:** `app/(app)/onboarding/page.tsx`، `app/(app)/onboarding/organization-form.tsx`، `app/(app)/onboarding/actions.ts`، `app/(app)/dashboard/page.tsx`، `package.json`، `docs/TASKS.md`
+- **Dependencies:** TASK-018
+- **Acceptance Criteria:** هر کاربر بتواند سازمان نخست خود را با نام و شناسهٔ یکتا ایجاد کند و به‌عنوان Admin عضو آن شود.
+- **Testing:** migration در PostgreSQL، TypeScript type check و بررسی دستی جریان.
+- **Status:** DONE
+
+### نتیجه
+
+- onboarding محافظت‌شده در مسیر `/onboarding` ایجاد شد.
+- نام و شناسهٔ سازمان با Zod در سرور اعتبارسنجی می‌شوند.
+- سازمان و عضویت Admin در یک تراکنش Prisma ساخته می‌شوند و شناسهٔ تکراری توسط constraint پایگاه‌داده محافظت می‌شود.
+- کاربرِ بدون سازمان از داشبورد به onboarding هدایت می‌شود و پس از ایجاد سازمان به داشبورد بازمی‌گردد.
+
+## TASK-020
+
+- **Title:** نمایش سازمان فعال در داشبورد
+- **Description:** واکشی سازمان نخست کاربر واردشده و نمایش نام آن در داشبورد برای تأیید فضای کاری فعال.
+- **Files:** `app/(app)/dashboard/page.tsx`، `docs/TASKS.md`
+- **Dependencies:** TASK-019
+- **Acceptance Criteria:** داشبورد نام سازمانی که کاربر عضو آن است را نمایش دهد و عضویت را از سرور بخواند.
+- **Testing:** TypeScript type check، lint و بررسی دستی کاربر عضو سازمان.
 - **Status:** TODO
+
+## TASK-015
+
+- **Title:** استفاده از فونت‌های محلی در رابط کاربر
+- **Description:** پیکربندی و اعمال خانواده‌های فونت ارسالی کاربر به‌شکل بهینه و محلی در Next.js.
+- **Files:** `app/fonts.ts`، `app/layout.tsx`، `app/globals.css`، `app/(auth)/sign-up/page.tsx`، `docs/TASKS.md`
+- **Dependencies:** TASK-013
+- **Acceptance Criteria:** رابط فارسی از IRANYekanXFaNum برای متن‌ها و Modam برای عنوان‌ها استفاده کند؛ درخواست شبکه‌ای برای فونت خارجی وجود نداشته باشد.
+- **Testing:** TypeScript type check، lint و production build.
+- **Status:** DONE
+
+### نتیجه
+
+- فونت‌های محلی IRANYekanXFaNum و Modam با `next/font/local` پیکربندی شدند.
+- فونت متن و عنوان به‌ترتیب در کل رابط و عنوان صفحهٔ ثبت‌نام اعمال شدند.
+- وابستگی Google Fonts از Root Layout حذف شد.
+- اعمال فونت با selector صریح برای متن، کنترل‌های فرم و عنوان مقاوم‌سازی شد.
+
+## TASK-016
+
+- **Title:** هدایت صفحهٔ نخست به ثبت‌نام
+- **Description:** حذف صفحهٔ پیش‌فرض Next.js و هدایت بازدیدکنندهٔ ریشهٔ برنامه به صفحهٔ ثبت‌نام.
+- **Files:** `app/page.tsx`، `docs/TASKS.md`
+- **Dependencies:** TASK-013
+- **Acceptance Criteria:** درخواست `GET /` با وضعیت redirect به `/sign-up` پاسخ داده شود.
+- **Testing:** بررسی پاسخ HTTP مسیر ریشه و TypeScript type check.
+- **Status:** DONE
+
+### نتیجه
+
+- صفحهٔ پیش‌فرض قالب حذف و مسیر `/` به `/sign-up` هدایت شد تا فرم ثبت‌نام در نخستین بازدید نمایش داده شود.
