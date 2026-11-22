@@ -20,9 +20,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "LedgerAccount" WHERE id = ${id} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
       const account = await tx.ledgerAccount.findFirst({ where: { id, organizationId: member.organizationId }, select: { id: true, parentId: true } });
       if (!account) return { error: "حساب پیدا نشد.", status: 404 } as const;
       if (parsed.data.isActive === false) {
+        if (await tx.partyAccount.findFirst({ where: { organizationId: member.organizationId, accountId: id }, select: { id: true } })) return { error: "حساب متصل به شخص قابل غیرفعال‌کردن نیست." , status: 409 } as const;
         const children = await tx.ledgerAccount.findFirst({ where: { parentId: id, organizationId: member.organizationId, isActive: true }, select: { id: true } });
         if (children) return { error: "ابتدا زیرحساب‌های فعال را غیرفعال کنید.", status: 409 } as const;
       }

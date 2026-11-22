@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { lockJournalAccounts, markPartyAccountsUsed } from "@/lib/journal-account-locks";
 
 const amount = z.string().regex(/^(0|[1-9]\d{0,19})$/, "مبلغ باید عدد صحیح غیرمنفی و حداکثر ۲۰ رقم باشد.");
 const schema = z.object({
@@ -44,16 +45,17 @@ export async function POST(request: Request) {
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${input.data.fiscalYearId} AND "organizationId" = ${membership.organizationId} FOR UPDATE`;
       const year = await tx.fiscalYear.findFirst({ where: { id: input.data.fiscalYearId, organizationId: membership.organizationId, status: "OPEN", startDate: { lte: date }, endDate: { gte: date } }, select: { id: true } });
       if (!year) return null;
-      const ids = [...new Set(input.data.lines.map((line) => line.accountId))].sort();
-      for (const id of ids) await tx.$queryRaw`SELECT id FROM "LedgerAccount" WHERE id = ${id} AND "organizationId" = ${membership.organizationId} FOR UPDATE`;
-      const count = await tx.ledgerAccount.count({ where: { id: { in: ids }, organizationId: membership.organizationId, isActive: true } });
-      if (count !== ids.length) return null;
-      return tx.journalEntry.create({ data: { organizationId: membership.organizationId, fiscalYearId: year.id, number: input.data.number, date, description: input.data.description, lines: { create: input.data.lines.map((line) => ({ accountId: line.accountId, description: line.description, debit: line.debit, credit: line.credit })) } }, select: { id: true, number: true, status: true } });
-    });
-    if (!result) return Response.json({ error: "سال مالی باز، تاریخ سند یا حساب‌های فعال سازمان معتبر نیستند." }, { status: 400 });
+      const ids = await lockJournalAccounts(tx, membership.organizationId, input.data.lines.map((line) => line.accountId));
+      if (!ids) return null;
+      const entry = await tx.journalEntry.create({ data: { organizationId: membership.organizationId, fiscalYearId: year.id, number: input.data.number, date, description: input.data.description, lines: { create: input.data.lines.map((line) => ({ accountId: line.accountId, description: line.description, debit: line.debit, credit: line.credit })) } }, select: { id: true, number: true, status: true } });
+      await markPartyAccountsUsed(tx, membership.organizationId, ids);
+      return entry;
+    }, { isolationLevel: "Serializable" });
+    if (!result) return Response.json({ error: "سال مالی، تاریخ، حساب فعال یا وضعیت شخص متصل معتبر نیست؛ در صورت تغییر هم‌زمان دوباره تلاش کنید." }, { status: 400 });
     return Response.json({ entry: result }, { status: 201 });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return Response.json({ error: "شمارهٔ سند در این سال مالی تکراری است." }, { status: 409 });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Journal draft creation failed", error);
     return Response.json({ error: "ایجاد پیش‌نویس انجام نشد." }, { status: 500 });
   }

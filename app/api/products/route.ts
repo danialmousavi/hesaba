@@ -2,17 +2,8 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { createProductSchema, productFields } from "@/lib/product-validation";
 
-const price = z.string().regex(/^\d{1,20}$/, "قیمت باید عدد صحیح نامنفی و حداکثر ۲۰ رقم به ریال باشد.").transform((value) => BigInt(value).toString());
-const inputSchema = z.strictObject({
-  code: z.string().trim().min(1, "کد کالا یا خدمت را وارد کنید.").max(50),
-  name: z.string().trim().min(1, "نام کالا یا خدمت را وارد کنید.").max(150),
-  type: z.enum(["GOODS", "SERVICE"]),
-  unit: z.string().trim().min(1, "واحد را وارد کنید.").max(50),
-  salePrice: price,
-  purchasePrice: price.nullable().optional(),
-  description: z.string().trim().max(1000).nullable().optional().transform((value) => value || null),
-});
 const querySchema = z.object({
   search: z.string().trim().max(150).default(""),
   type: z.enum(["all", "goods", "service"]).default("all"),
@@ -20,7 +11,6 @@ const querySchema = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
-const fields = { id: true, code: true, name: true, type: true, unit: true, salePrice: true, purchasePrice: true, description: true, isActive: true, createdAt: true, updatedAt: true } as const;
 
 async function membership(request: Request) {
   const session = await auth.api.getSession({ headers: request.headers });
@@ -42,7 +32,7 @@ export async function GET(request: Request) {
   };
   try {
     const [products, total] = await prisma.$transaction([
-      prisma.product.findMany({ where, select: fields, orderBy: [{ name: "asc" }, { id: "asc" }], skip: (page - 1) * pageSize, take: pageSize }),
+      prisma.product.findMany({ where, select: productFields, orderBy: [{ name: "asc" }, { id: "asc" }], skip: (page - 1) * pageSize, take: pageSize }),
       prisma.product.count({ where }),
     ], { isolationLevel: "RepeatableRead" });
     return Response.json({ products, total, page, pageSize }, { headers: { "Cache-Control": "no-store" } });
@@ -57,10 +47,10 @@ export async function POST(request: Request) {
   const member = await membership(request);
   if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
   if (member.role === "VIEWER") return Response.json({ error: "نقش مشاهده‌گر اجازه ثبت کالا یا خدمت ندارد." }, { status: 403 });
-  const parsed = inputSchema.safeParse(await request.json().catch(() => null));
+  const parsed = createProductSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues[0]?.message ?? "اطلاعات معتبر نیست." }, { status: 400 });
   try {
-    const product = await prisma.product.create({ data: { ...parsed.data, organizationId: member.organizationId }, select: fields });
+    const product = await prisma.product.create({ data: { ...parsed.data, organizationId: member.organizationId }, select: productFields });
     return Response.json({ product }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return Response.json({ error: "این کد در سازمان شما قبلاً استفاده شده است." }, { status: 409 });

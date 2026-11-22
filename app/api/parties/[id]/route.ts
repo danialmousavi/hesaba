@@ -17,10 +17,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Party" WHERE id = ${id.data} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
       const party = await tx.party.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: { isCustomer: true, isSupplier: true } });
       if (!party) return { error: "شخص پیدا نشد.", status: 404 } as const;
       if (!(parsed.data.isCustomer ?? party.isCustomer) && !(parsed.data.isSupplier ?? party.isSupplier)) {
         return { error: "حداقل یک نقش برای شخص انتخاب کنید.", status: 400 } as const;
+      }
+      if (parsed.data.isCustomer === false || parsed.data.isSupplier === false) {
+        const links = await tx.partyAccount.findMany({ where: { organizationId: member.organizationId, partyId: id.data }, select: { purpose: true } });
+        if (links.some((link) => (link.purpose === "RECEIVABLE" && parsed.data.isCustomer === false) || (link.purpose === "PAYABLE" && parsed.data.isSupplier === false))) return { error: "ابتدا اتصال حساب مربوط به این نقش را تعیین تکلیف کنید.", status: 409 } as const;
       }
       const updated = await tx.party.update({ where: { organizationId_id: { organizationId: member.organizationId, id: id.data } }, data: parsed.data, select: partyFields });
       return { party: updated } as const;

@@ -59,6 +59,8 @@ node tests/trial-balance-isolated.mjs
 node scripts/seed-demo.mjs <organization-id>
 ```
 
+اسکریپت `scripts/seed-test-showcase.mjs` داده‌های تکمیلی اشخاص، کالا و اسناد را فقط برای سازمانی به نام `test` و سال مالی باز «سال مالی 1404» ایجاد می‌کند. این داده‌ها قبلاً در سازمان test این محیط ثبت شده‌اند؛ اجرای دوباره در صورت وجود داده یا کد رزروشده متوقف می‌شود. برچسب‌های نمایشی به درخواست کاربر از داده‌های ثبت‌شده حذف شده‌اند.
+
 ## متغیرهای محیطی
 
 `POSTGRES_DB`، `POSTGRES_USER` و `POSTGRES_PASSWORD` برای سرویس نمونه Docker هستند؛ `DATABASE_URL` اتصال برنامه و Prisma را مشخص می‌کند. `BETTER_AUTH_SECRET` و `BETTER_AUTH_URL` برای احراز هویت‌اند. `OLLAMA_BASE_URL` و `OLLAMA_MODEL` برای فاز آینده در نظر گرفته شده‌اند؛ اتصال AI هنوز ساخته نشده است. مقادیر نمونه در `.env.example` هستند؛ `.env.local` نباید وارد Git شود.

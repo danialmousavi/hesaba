@@ -59,6 +59,25 @@ try {
     await db.query('INSERT INTO "Membership" (id,"userId","organizationId",role,"updatedAt") VALUES ($1,$2,$3,$4,now())', [`c${token}e`, user, org, "ADMIN"]);
     await db.query('INSERT INTO "FiscalYear" (id,"organizationId",name,"startDate","endDate","updatedAt") VALUES ($1,$2,$3,$4,$5,now())', [year, org, "Test", "2026-01-01", "2026-12-31"]);
     for (const [id, code] of [[debitAccount, "100"], [creditAccount, "200"]]) await db.query('INSERT INTO "LedgerAccount" (id,"organizationId",code,name,type,"updatedAt") VALUES ($1,$2,$3,$4,$5,now())', [id, org, code, code, "ASSET"]);
+    const linkParty = `c${token}linkparty`, linkAccount = `c${token}linkaccount`, linkPayable = `c${token}linkpayable`, foreignOrg = `c${token}foreign`, foreignAccount = `c${token}foreignacc`;
+    await db.query('INSERT INTO "Party" (id,"organizationId",name,"isCustomer","isSupplier","updatedAt") VALUES ($1,$2,$3,true,true,now())', [linkParty, org, "Linked party"]);
+    for (const [accountId, code, type] of [[linkAccount, "610", "ASSET"], [linkPayable, "620", "LIABILITY"]]) await db.query('INSERT INTO "LedgerAccount" (id,"organizationId",code,name,type,"updatedAt") VALUES ($1,$2,$3,$3,$4,now())', [accountId, org, code, type]);
+    await db.query('INSERT INTO "Organization" (id,name,slug,"updatedAt") VALUES ($1,$2,$1,now())', [foreignOrg, "Foreign"]);
+    await db.query('INSERT INTO "LedgerAccount" (id,"organizationId",code,name,type,"updatedAt") VALUES ($1,$2,$3,$3,$4,now())', [foreignAccount, foreignOrg, "foreign", "ASSET"]);
+    const linkSql = 'INSERT INTO "PartyAccount" (id,"organizationId","partyId","accountId",purpose) VALUES ($1,$2,$3,$4,$5)';
+    await db.query(linkSql, [`c${token}link1`, org, linkParty, linkAccount, "RECEIVABLE"]);
+    await db.query(linkSql, [`c${token}link2`, org, linkParty, linkPayable, "PAYABLE"]);
+    await assert.rejects(db.query(linkSql, [`c${token}dupaccount`, org, `c${token}p`, linkAccount, "RECEIVABLE"]), { code: "23505" });
+    await assert.rejects(db.query(linkSql, [`c${token}duppurpose`, org, linkParty, debitAccount, "RECEIVABLE"]), { code: "23505" });
+    await assert.rejects(db.query(linkSql, [`c${token}crossaccount`, org, `c${token}p`, foreignAccount, "RECEIVABLE"]), { code: "23503" });
+    await assert.rejects(db.query(linkSql, [`c${token}crossparty`, foreignOrg, linkParty, foreignAccount, "RECEIVABLE"]), { code: "23503" });
+    const eventSql = 'INSERT INTO "PartyAccountEvent" (id,"organizationId","partyId",purpose,type,"actorId","actorName","oldAccountId","newAccountId") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)';
+    await db.query(eventSql, [`c${token}linkevent`, org, linkParty, "RECEIVABLE", "LINKED", user, "Test", null, linkAccount]);
+    await assert.rejects(db.query(eventSql, [`c${token}badlinkevent`, org, linkParty, "RECEIVABLE", "CHANGED", user, "Test", linkAccount, linkAccount]), { code: "23514" });
+    await assert.rejects(db.query(eventSql, [`c${token}crosslinkevent`, foreignOrg, linkParty, "RECEIVABLE", "LINKED", user, "Test", null, foreignAccount]), { code: "23503" });
+    await assert.rejects(db.query('DELETE FROM "LedgerAccount" WHERE id=$1', [linkAccount]), { code: "23503" });
+    await db.query('DELETE FROM "PartyAccount" WHERE id=$1', [`c${token}link1`]);
+    assert.equal((await db.query('SELECT count(*)::int AS count FROM "PartyAccountEvent" WHERE "partyId"=$1', [linkParty])).rows[0].count, 1);
   } finally { await db.end(); }
   const headers = { cookie, origin: base, "content-type": "application/json" };
   const partiesUrl = `${base}/api/parties`;
@@ -95,10 +114,25 @@ try {
     assert.equal(productList.total, 1); assert.equal(productList.products[0].id, `c${token}prod`); assert.equal(productList.products[0].salePrice, "99999999999999999999");
     assert.equal((await (await fetch(`${productsUrl}?type=service&pageSize=1`, { headers })).json()).total, 2);
     assert.equal((await fetch(`${productsUrl}?pageSize=101`, { headers })).status, 400);
+    const patchProduct = (id, data, customHeaders = headers) => fetch(`${productsUrl}/${id}`, { method: "PATCH", headers: customHeaders, body: JSON.stringify(data) });
+    assert.equal((await patchProduct(product.id, { name: "Test" }, { "content-type": "application/json", origin: base })).status, 401);
+    assert.equal((await patchProduct(product.id, { name: "Test" }, { ...headers, origin: "http://invalid.example" })).status, 403);
+    assert.equal((await patchProduct(`c${token}otherprod`, { name: "Forbidden" })).status, 404);
+    assert.equal((await patchProduct("invalid", { name: "Invalid" })).status, 400);
+    assert.equal((await patchProduct(product.id, {})).status, 400);
+    assert.equal((await patchProduct(product.id, { organizationId: `c${token}other` })).status, 400);
+    assert.equal((await patchProduct(product.id, { code: "P-1" })).status, 409);
+    for (const value of [-1, "-1", "1.5", "100000000000000000000"]) assert.equal((await patchProduct(product.id, { salePrice: value })).status, 400);
+    const updatedProduct = await patchProduct(product.id, { name: "  Updated service  ", salePrice: "99999999999999999999", purchasePrice: null, description: "test", isActive: false });
+    assert.equal(updatedProduct.status, 200, await updatedProduct.clone().text());
+    const editedProduct = (await updatedProduct.json()).product;
+    assert.equal(editedProduct.name, "Updated service"); assert.equal(editedProduct.salePrice, "99999999999999999999"); assert.equal(editedProduct.purchasePrice, null); assert.equal(editedProduct.isActive, false);
+    const clearDescription = await patchProduct(product.id, { description: "", isActive: true });
+    assert.equal(clearDescription.status, 200); assert.equal((await clearDescription.json()).product.description, null);
     await partyDb.query('INSERT INTO "Party" (id,"organizationId",name,"isCustomer","updatedAt") VALUES ($1,$2,$3,true,now())', [`c${token}outside`, `c${token}other`, "Alice outside"]);
     const listed = await (await fetch(`${partiesUrl}?search=alice&role=customer`, { headers })).json();
     assert.equal(listed.total, 1); assert.equal(listed.parties[0].id, party.id);
-    assert.equal((await (await fetch(`${partiesUrl}?role=supplier`, { headers })).json()).total, 1);
+    assert.equal((await (await fetch(`${partiesUrl}?role=supplier&search=Customer`, { headers })).json()).total, 1);
     assert.equal((await fetch(`${partiesUrl}?page=0`, { headers })).status, 400);
     const patchParty = (id, data, customHeaders = headers) => fetch(`${partiesUrl}/${id}`, { method: "PATCH", headers: customHeaders, body: JSON.stringify(data) });
     assert.equal((await patchParty(party.id, { name: "Test" }, { ...headers, origin: "http://invalid.example" })).status, 403);
@@ -116,11 +150,13 @@ try {
     await partyDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["VIEWER", user, org]);
     assert.equal((await fetch(productsUrl, { headers })).status, 200);
     assert.equal((await createProduct({ ...productInput, code: "VIEWER" })).status, 403);
+    assert.equal((await patchProduct(product.id, { isActive: false })).status, 403);
     assert.equal((await fetch(partiesUrl, { headers })).status, 200);
     assert.equal((await fetch(partiesUrl, { method: "POST", headers, body: JSON.stringify(partyInput) })).status, 403);
     assert.equal((await patchParty(party.id, { name: "Forbidden" })).status, 403);
     await partyDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["ACCOUNTANT", user, org]);
     assert.equal((await createProduct({ ...productInput, code: "ACCOUNTANT", salePrice: "0", purchasePrice: null })).status, 201);
+    assert.equal((await patchProduct(product.id, { isActive: false })).status, 200);
     assert.equal((await fetch(partiesUrl, { method: "POST", headers, body: JSON.stringify({ ...partyInput, name: "Supplier", isCustomer: false, isSupplier: true }) })).status, 201);
     assert.equal((await patchParty(party.id, { name: "Accountant edit" })).status, 200);
     await partyDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["ADMIN", user, org]);
@@ -139,6 +175,32 @@ try {
   assert.equal((await fetch(`${base}/api/journal-entries/${secondId}/post`, { method: "POST", headers })).status, 200);
   const unposted = await fetch(`${base}/api/journal-entries`, { method: "POST", headers, body: JSON.stringify({ ...draft, number: 3 }) });
   assert.equal(unposted.status, 201);
+  const financialDb = new pg.Client({ connectionString: testUrl.toString() });
+  await financialDb.connect();
+  try {
+    const insert = 'INSERT INTO "FinancialTransaction" (id,"organizationId","fiscalYearId",type,status,date,amount,description,"paymentMethod","categoryAccountId","settlementAccountId","journalEntryId","updatedAt") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())';
+    const row = (recordId, overrides = {}) => ({ id: recordId, org, year, type: "INCOME", status: "DRAFT", date: "2026-06-01", amount: "99999999999999999999", description: "Income", method: "CASH", category: debitAccount, settlement: creditAccount, entry: null, ...overrides });
+    const values = (item) => [item.id, item.org, item.year, item.type, item.status, item.date, item.amount, item.description, item.method, item.category, item.settlement, item.entry];
+    const otherYear = `c${token}otheryear`;
+    await financialDb.query('INSERT INTO "FiscalYear" (id,"organizationId",name,"startDate","endDate",status,"updatedAt") VALUES ($1,$2,$3,$4,$5,$6,now())', [otherYear, org, "Other year", "2027-01-01", "2027-12-31", "CLOSED"]);
+    await financialDb.query(insert, values(row(`c${token}finance1`)));
+    await financialDb.query(insert, values(row(`c${token}finance2`, { type: "EXPENSE", amount: "1", method: "BANK_TRANSFER" })));
+    await assert.rejects(financialDb.query(insert, values(row(`c${token}finzero`, { amount: "0" }))), { code: "23514" });
+    await assert.rejects(financialDb.query(insert, values(row(`c${token}finnegative`, { amount: "-1" }))), { code: "23514" });
+    await assert.rejects(financialDb.query(insert, values(row(`c${token}finblank`, { description: " " }))), { code: "23514" });
+    await assert.rejects(financialDb.query(insert, values(row(`c${token}finsame`, { category: creditAccount }))), { code: "23514" });
+    await assert.rejects(financialDb.query(insert, values(row(`c${token}finforeign`, { category: `c${token}foreignacc` }))), { code: "23503" });
+    await assert.rejects(financialDb.query(insert, values(row(`c${token}findraftlinked`, { entry: id }))), { code: "23514" });
+    await assert.rejects(financialDb.query(insert, values(row(`c${token}finpostedmissing`, { status: "POSTED" }))), { code: "23514" });
+    const unpostedId = (await unposted.clone().json()).entry.id;
+    await assert.rejects(financialDb.query(insert, values(row(`c${token}finpostedunposted`, { status: "POSTED", entry: unpostedId }))), { code: "23514" });
+    await assert.rejects(financialDb.query(insert, values(row(`c${token}findate`, { status: "POSTED", entry: id, date: "2026-06-02" }))), { code: "23514" });
+    await assert.rejects(financialDb.query(insert, values(row(`c${token}finyear`, { status: "POSTED", entry: id, year: otherYear }))), { code: "23514" });
+    await financialDb.query('UPDATE "FinancialTransaction" SET status=$1,"journalEntryId"=$2,"updatedAt"=now() WHERE id=$3', ["POSTED", id, `c${token}finance1`]);
+    await assert.rejects(financialDb.query(insert, values(row(`c${token}finduplicate`, { status: "POSTED", entry: id }))), { code: "23505" });
+    await assert.rejects(financialDb.query('UPDATE "FinancialTransaction" SET amount=1 WHERE id=$1', [`c${token}finance1`]), { code: "23514" });
+    await assert.rejects(financialDb.query('DELETE FROM "FinancialTransaction" WHERE id=$1', [`c${token}finance1`]), { code: "23514" });
+  } finally { await financialDb.end(); }
   const report = await fetch(`${base}/api/reports/trial-balance?fiscalYearId=${year}`, { headers });
   assert.equal(report.status, 200, await report.clone().text());
   const result = await report.json();
@@ -209,6 +271,112 @@ try {
     { year: 1405, month: 3, revenue: "100", expenses: "40" },
   ]);
   assert.equal((await fetch(`${base}/api/reports/profit-loss?fiscalYearId=c${token}x`, { headers })).status, 404);
+  const protectedParty = `c${token}linkparty`, protectedAccount = `c${token}linkpayable`;
+  const patchJson = (url, data) => fetch(url, { method: "PATCH", headers, body: JSON.stringify(data) });
+  assert.equal((await patchJson(`${base}/api/parties/${protectedParty}`, { isSupplier: false })).status, 409);
+  assert.equal((await patchJson(`${base}/api/ledger-accounts/${protectedAccount}`, { isActive: false })).status, 409);
+  const child = await fetch(`${base}/api/ledger-accounts`, { method: "POST", headers, body: JSON.stringify({ code: "621", name: "Child", type: "LIABILITY", parentId: protectedAccount }) });
+  assert.equal(child.status, 400);
+  const linkedDraftInput = { ...draft, number: 8, lines: [{ accountId: debitAccount, debit: "50", credit: "0" }, { accountId: protectedAccount, debit: "0", credit: "50" }] };
+  const linkedDraft = await fetch(`${base}/api/journal-entries`, { method: "POST", headers, body: JSON.stringify(linkedDraftInput) });
+  assert.equal(linkedDraft.status, 201, await linkedDraft.clone().text());
+  const linkedDraftId = (await linkedDraft.json()).entry.id;
+  const checkDb = new pg.Client({ connectionString: testUrl.toString() });
+  await checkDb.connect();
+  try {
+    const receivableAccount = `c${token}linkaccount`;
+    await checkDb.query('INSERT INTO "PartyAccount" (id,"organizationId","partyId","accountId",purpose) VALUES ($1,$2,$3,$4,$5)', [`c${token}relink`, org, protectedParty, receivableAccount, "RECEIVABLE"]);
+    const draftToEdit = (await unposted.json()).entry.id;
+    const editedDraft = await patchJson(`${base}/api/journal-entries/${draftToEdit}`, { number: 3, date: draft.date, description: "Edited", lines: [{ accountId: receivableAccount, debit: "25", credit: "0" }, { accountId: creditAccount, debit: "0", credit: "25" }] });
+    assert.equal(editedDraft.status, 200, await editedDraft.clone().text());
+    assert.ok((await checkDb.query('SELECT "firstUsedAt" FROM "PartyAccount" WHERE "organizationId"=$1 AND "accountId"=$2', [org, receivableAccount])).rows[0].firstUsedAt);
+    const used = await checkDb.query('SELECT "firstUsedAt" FROM "PartyAccount" WHERE "organizationId"=$1 AND "accountId"=$2', [org, protectedAccount]);
+    assert.ok(used.rows[0].firstUsedAt);
+    assert.equal((await fetch(`${base}/api/journal-entries/${linkedDraftId}`, { method: "DELETE", headers })).status, 200);
+    assert.ok((await checkDb.query('SELECT "firstUsedAt" FROM "PartyAccount" WHERE "organizationId"=$1 AND "accountId"=$2', [org, protectedAccount])).rows[0].firstUsedAt);
+    assert.equal((await patchJson(`${base}/api/parties/${protectedParty}`, { isActive: false })).status, 200);
+    assert.equal((await fetch(`${base}/api/journal-entries`, { method: "POST", headers, body: JSON.stringify(linkedDraftInput) })).status, 400);
+    assert.equal((await patchJson(`${base}/api/parties/${protectedParty}`, { isActive: true })).status, 200);
+    const retryDraft = await fetch(`${base}/api/journal-entries`, { method: "POST", headers, body: JSON.stringify(linkedDraftInput) });
+    assert.equal(retryDraft.status, 201, await retryDraft.clone().text());
+    const retryId = (await retryDraft.json()).entry.id;
+    assert.equal((await patchJson(`${base}/api/parties/${protectedParty}`, { isActive: false })).status, 200);
+    assert.equal((await fetch(`${base}/api/journal-entries/${retryId}/post`, { method: "POST", headers })).status, 409);
+    assert.equal((await patchJson(`${base}/api/parties/${protectedParty}`, { isActive: true })).status, 200);
+    const racing = await Promise.all([
+      patchJson(`${base}/api/parties/${protectedParty}`, { isActive: false }),
+      fetch(`${base}/api/journal-entries`, { method: "POST", headers, body: JSON.stringify({ ...linkedDraftInput, number: 9 }) }),
+    ]);
+    assert.equal(racing[0].status, 200);
+    assert.ok([201, 400, 409].includes(racing[1].status));
+    if (racing[1].status === 201) assert.equal((await fetch(`${base}/api/journal-entries/${(await racing[1].json()).entry.id}/post`, { method: "POST", headers })).status, 409);
+  } finally { await checkDb.end(); }
+  const linkDb = new pg.Client({ connectionString: testUrl.toString() });
+  await linkDb.connect();
+  try {
+    const person = `c${token}apiparty`, person2 = `c${token}apiparty2`;
+    for (const partyId of [person, person2]) await linkDb.query('INSERT INTO "Party" (id,"organizationId",name,"isCustomer","isSupplier","updatedAt") VALUES ($1,$2,$3,true,true,now())', [partyId, org, "API party"]);
+    const accountIds = Array.from({ length: 8 }, (_, index) => `c${token}apiaccount${index}`);
+    for (const [index, accountId] of accountIds.entries()) await linkDb.query('INSERT INTO "LedgerAccount" (id,"organizationId",code,name,type,"updatedAt") VALUES ($1,$2,$3,$3,$4,now())', [accountId, org, String(710 + index), index === 2 ? "LIABILITY" : "ASSET"]);
+    await linkDb.query('UPDATE "LedgerAccount" SET "isActive"=false WHERE id=$1', [accountIds[3]]);
+    const linkUrl = `${base}/api/parties/${person}/accounts`;
+    const setLink = (partyId, purpose, accountId, customHeaders = headers) => fetch(`${base}/api/parties/${partyId}/accounts`, { method: "PUT", headers: customHeaders, body: JSON.stringify({ purpose, accountId }) });
+    assert.equal((await fetch(linkUrl)).status, 401);
+    assert.equal((await setLink(person, "RECEIVABLE", accountIds[0], { ...headers, origin: "http://invalid.example" })).status, 403);
+    assert.equal((await setLink(`c${token}outside`, "RECEIVABLE", accountIds[0])).status, 404);
+    assert.equal((await setLink(person, "RECEIVABLE", accountIds[2])).status, 400);
+    assert.equal((await setLink(person, "RECEIVABLE", accountIds[3])).status, 400);
+    assert.equal((await setLink(person, "RECEIVABLE", debitAccount)).status, 409);
+    assert.equal((await setLink(person, "RECEIVABLE", `c${token}foreignacc`)).status, 400);
+    assert.equal((await patchJson(`${base}/api/parties/${person2}`, { isSupplier: false })).status, 200);
+    assert.equal((await setLink(person2, "PAYABLE", accountIds[2])).status, 400);
+    assert.equal((await patchJson(`${base}/api/parties/${person2}`, { isSupplier: true })).status, 200);
+    assert.equal((await fetch(`${base}/api/ledger-accounts`, { method: "POST", headers, body: JSON.stringify({ code: "720", name: "Existing child", type: "ASSET", parentId: accountIds[6] }) })).status, 201);
+    assert.equal((await setLink(person2, "RECEIVABLE", accountIds[6])).status, 409);
+    const racePeople = [`c${token}raceperson1`, `c${token}raceperson2`];
+    for (const partyId of racePeople) await linkDb.query('INSERT INTO "Party" (id,"organizationId",name,"isCustomer","updatedAt") VALUES ($1,$2,$3,true,now())', [partyId, org, "Race party"]);
+    const linkVsLink = await Promise.all(racePeople.map((partyId) => setLink(partyId, "RECEIVABLE", accountIds[7])));
+    assert.equal(linkVsLink.filter((response) => response.status === 200).length, 1);
+    assert.equal(linkVsLink.filter((response) => response.status === 409).length, 1);
+    assert.equal((await setLink(person, "RECEIVABLE", accountIds[0])).status, 200);
+    assert.equal((await setLink(person, "RECEIVABLE", accountIds[0])).status, 200);
+    assert.equal((await setLink(person2, "RECEIVABLE", accountIds[0])).status, 409);
+    assert.equal((await setLink(person, "PAYABLE", accountIds[2])).status, 200);
+    const linkList = await fetch(linkUrl, { headers });
+    assert.equal(linkList.status, 200); assert.equal((await linkList.json()).links.length, 2);
+    assert.equal((await setLink(person, "RECEIVABLE", accountIds[1])).status, 200);
+    assert.equal((await setLink(person, "RECEIVABLE", null)).status, 200);
+    const events = await linkDb.query('SELECT type,"oldAccountId","newAccountId" FROM "PartyAccountEvent" WHERE "organizationId"=$1 AND "partyId"=$2 ORDER BY "createdAt",id', [org, person]);
+    assert.equal(events.rowCount, 4);
+    assert.equal(events.rows.filter((event) => event.type === "CHANGED" && event.oldAccountId === accountIds[0] && event.newAccountId === accountIds[1]).length, 1);
+    assert.equal(events.rows.filter((event) => event.type === "UNLINKED" && event.oldAccountId === accountIds[1] && event.newAccountId === null).length, 1);
+    await linkDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["VIEWER", user, org]);
+    assert.equal((await fetch(linkUrl, { headers })).status, 200);
+    assert.equal((await setLink(person, "RECEIVABLE", accountIds[1])).status, 403);
+    await linkDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["ACCOUNTANT", user, org]);
+    assert.equal((await setLink(person, "RECEIVABLE", accountIds[1])).status, 403);
+    await linkDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["ADMIN", user, org]);
+    const linkVsChild = await Promise.all([
+      setLink(person, "RECEIVABLE", accountIds[4]),
+      fetch(`${base}/api/ledger-accounts`, { method: "POST", headers, body: JSON.stringify({ code: "719", name: "Race child", type: "ASSET", parentId: accountIds[4] }) }),
+    ]);
+    assert.ok(!(linkVsChild[0].status === 200 && linkVsChild[1].status === 201), "Account cannot be linked and become a parent");
+    assert.ok([200, 409].includes(linkVsChild[0].status)); assert.ok([201, 400, 409].includes(linkVsChild[1].status));
+    if (linkVsChild[0].status === 200) assert.equal((await setLink(person, "RECEIVABLE", null)).status, 200);
+    const linkVsJournal = await Promise.all([
+      setLink(person, "RECEIVABLE", accountIds[5]),
+      fetch(`${base}/api/journal-entries`, { method: "POST", headers, body: JSON.stringify({ ...draft, number: 10, lines: [{ accountId: accountIds[5], debit: "10", credit: "0" }, { accountId: creditAccount, debit: "0", credit: "10" }] }) }),
+    ]);
+    assert.ok([200, 409].includes(linkVsJournal[0].status)); assert.ok([201, 400, 409].includes(linkVsJournal[1].status));
+    if (linkVsJournal[0].status === 200 && linkVsJournal[1].status === 201) {
+      const linked = await linkDb.query('SELECT "firstUsedAt" FROM "PartyAccount" WHERE "organizationId"=$1 AND "accountId"=$2', [org, accountIds[5]]);
+      assert.ok(linked.rows[0].firstUsedAt);
+      assert.equal((await setLink(person, "RECEIVABLE", null)).status, 409);
+    }
+    if (linkVsJournal[0].status === 200 && linkVsJournal[1].status !== 201) assert.equal((await setLink(person, "RECEIVABLE", null)).status, 200);
+    const protectedLink = await setLink(`c${token}linkparty`, "PAYABLE", null);
+    assert.equal(protectedLink.status, 409);
+  } finally { await linkDb.end(); }
   console.log("Isolated posting and trial balance checks passed.");
 } finally {
   if (server && server.exitCode === null) { server.kill(); await new Promise((resolve) => server.once("exit", resolve)); }

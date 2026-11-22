@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { lockJournalAccounts, markPartyAccountsUsed } from "@/lib/journal-account-locks";
 
 const amount = z.string().regex(/^(0|[1-9]\d{0,19})$/);
 const schema = z.object({
@@ -32,17 +33,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!entry) return { status: 404, error: "سند پیدا نشد." } as const;
       if (entry.status !== "DRAFT") return { status: 409, error: "سند ثبت‌شده قابل ویرایش نیست." } as const;
       if (entry.fiscalYear.status !== "OPEN" || date < entry.fiscalYear.startDate || date > entry.fiscalYear.endDate) return { status: 409, error: "سال مالی بسته است یا تاریخ خارج از محدودهٔ آن است." } as const;
-      const ids = [...new Set(parsed.data.lines.map((line) => line.accountId))].sort();
-      for (const accountId of ids) await tx.$queryRaw`SELECT id FROM "LedgerAccount" WHERE id = ${accountId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
-      if (await tx.ledgerAccount.count({ where: { id: { in: ids }, organizationId: member.organizationId, isActive: true } }) !== ids.length) return { status: 400, error: "حساب‌های سند باید فعال و متعلق به سازمان باشند." } as const;
+      const ids = await lockJournalAccounts(tx, member.organizationId, parsed.data.lines.map((line) => line.accountId));
+      if (!ids) return { status: 400, error: "حساب یا شخص متصل معتبر و فعال نیست؛ در صورت تغییر هم‌زمان دوباره تلاش کنید." } as const;
       await tx.journalLine.deleteMany({ where: { organizationId: member.organizationId, entryId: id } });
       const updated = await tx.journalEntry.update({ where: { id }, data: { number: parsed.data.number, date, description: parsed.data.description, lines: { create: parsed.data.lines.map((line) => ({ accountId: line.accountId, description: line.description, debit: line.debit, credit: line.credit })) } }, select: { id: true, number: true, status: true } });
+      await markPartyAccountsUsed(tx, member.organizationId, ids);
       return { status: 200, entry: updated } as const;
-    });
+    }, { isolationLevel: "Serializable" });
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ entry: result.entry });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return Response.json({ error: "شمارهٔ سند در این سال مالی تکراری است." }, { status: 409 });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Journal draft update failed", error);
     return Response.json({ error: "ویرایش پیش‌نویس انجام نشد." }, { status: 500 });
   }

@@ -41,6 +41,33 @@ enum ProductType {
   SERVICE
 }
 
+enum PartyAccountPurpose {
+  RECEIVABLE
+  PAYABLE
+}
+
+enum PartyAccountEventType {
+  LINKED
+  UNLINKED
+  CHANGED
+}
+
+enum FinancialTransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum FinancialTransactionStatus {
+  DRAFT
+  POSTED
+}
+
+enum FinancialPaymentMethod {
+  CASH
+  BANK_TRANSFER
+  OTHER
+}
+
 model User {
   id            String       @id @default(cuid())
   name          String
@@ -68,6 +95,8 @@ model Organization {
   journalEvents  JournalEvent[]
   parties        Party[]
   products       Product[]
+  partyAccountEvents PartyAccountEvent[]
+  financialTransactions FinancialTransaction[]
 }
 
 model Product {
@@ -104,11 +133,45 @@ model Party {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  accountLinks   PartyAccount[]
+  accountEvents  PartyAccountEvent[]
 
   @@unique([organizationId, id])
   @@index([organizationId, name])
   @@index([organizationId, isCustomer, isActive])
   @@index([organizationId, isSupplier, isActive])
+}
+
+model PartyAccount {
+  id             String              @id @default(cuid())
+  organizationId String
+  partyId        String
+  accountId      String
+  purpose        PartyAccountPurpose
+  firstUsedAt    DateTime?
+  createdAt      DateTime            @default(now())
+  party          Party               @relation(fields: [organizationId, partyId], references: [organizationId, id], onDelete: Restrict)
+  account        LedgerAccount       @relation(fields: [organizationId, accountId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, partyId, purpose])
+  @@unique([organizationId, accountId])
+}
+
+model PartyAccountEvent {
+  id             String                @id @default(cuid())
+  organizationId String
+  partyId        String
+  purpose        PartyAccountPurpose
+  type           PartyAccountEventType
+  actorId        String
+  actorName      String
+  oldAccountId   String?
+  newAccountId   String?
+  createdAt      DateTime              @default(now())
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  party          Party                 @relation(fields: [organizationId, partyId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, partyId, createdAt])
 }
 
 model JournalEvent {
@@ -139,6 +202,9 @@ model LedgerAccount {
   parent         LedgerAccount?    @relation("LedgerAccountHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
   children       LedgerAccount[]   @relation("LedgerAccountHierarchy")
   journalLines   JournalLine[]
+  partyLinks     PartyAccount[]
+  financialCategories FinancialTransaction[] @relation("FinancialCategory")
+  financialSettlements FinancialTransaction[] @relation("FinancialSettlement")
 
   @@unique([organizationId, code])
   @@unique([organizationId, id])
@@ -171,6 +237,7 @@ model FiscalYear {
   updatedAt      DateTime         @updatedAt
   organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   journalEntries JournalEntry[]
+  financialTransactions FinancialTransaction[]
 
   @@unique([organizationId, name])
   @@unique([organizationId, id])
@@ -192,10 +259,39 @@ model JournalEntry {
   fiscalYear     FiscalYear         @relation(fields: [organizationId, fiscalYearId], references: [organizationId, id], onDelete: Restrict)
   lines          JournalLine[]
   events         JournalEvent[]
+  financialTransaction FinancialTransaction?
 
   @@unique([organizationId, fiscalYearId, number])
   @@unique([organizationId, id])
+  @@unique([organizationId, fiscalYearId, id])
   @@index([organizationId, date])
+}
+
+model FinancialTransaction {
+  id                  String                     @id @default(cuid())
+  organizationId      String
+  fiscalYearId        String
+  type                FinancialTransactionType
+  status              FinancialTransactionStatus @default(DRAFT)
+  date                DateTime                   @db.Date
+  amount              Decimal                    @db.Decimal(20, 0)
+  description         String
+  paymentMethod       FinancialPaymentMethod
+  categoryAccountId   String
+  settlementAccountId String
+  journalEntryId      String?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  organization        Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fiscalYear          FiscalYear                 @relation(fields: [organizationId, fiscalYearId], references: [organizationId, id], onDelete: Restrict)
+  categoryAccount     LedgerAccount              @relation("FinancialCategory", fields: [organizationId, categoryAccountId], references: [organizationId, id], onDelete: Restrict)
+  settlementAccount   LedgerAccount              @relation("FinancialSettlement", fields: [organizationId, settlementAccountId], references: [organizationId, id], onDelete: Restrict)
+  journalEntry        JournalEntry?              @relation(fields: [organizationId, fiscalYearId, journalEntryId], references: [organizationId, fiscalYearId, id], onDelete: Restrict, map: "FinancialTransaction_org_year_entry_fkey")
+
+  @@unique([organizationId, journalEntryId])
+  @@unique([organizationId, fiscalYearId, journalEntryId], map: "FinancialTransaction_org_year_entry_key")
+  @@index([organizationId, fiscalYearId, date])
+  @@index([organizationId, type, status])
 }
 
 model JournalLine {

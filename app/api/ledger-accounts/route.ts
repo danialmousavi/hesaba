@@ -47,12 +47,14 @@ export async function POST(request: Request) {
   try {
     const account = await prisma.$transaction(async (tx) => {
       if (parentId) {
+        await tx.$queryRaw`SELECT id FROM "LedgerAccount" WHERE id = ${parentId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
         const parent = await tx.ledgerAccount.findFirst({ where: { id: parentId, organizationId: member.organizationId }, select: { type: true, isActive: true } });
         if (!parent || !parent.isActive || parent.type !== parsed.data.type) return null;
+        if (await tx.partyAccount.findFirst({ where: { organizationId: member.organizationId, accountId: parentId }, select: { id: true } })) return null;
       }
       return tx.ledgerAccount.create({ data: { organizationId: member.organizationId, parentId, code: parsed.data.code, name: parsed.data.name, type: parsed.data.type }, select: { id: true, parentId: true, code: true, name: true, type: true, isActive: true } });
     }, { isolationLevel: "Serializable" });
-    if (!account) return Response.json({ error: "حساب والد باید فعال، هم‌نوع و متعلق به سازمان شما باشد." }, { status: 400 });
+    if (!account) return Response.json({ error: "حساب والد باید فعال، هم‌نوع و متعلق به سازمان شما باشد و به شخصی اختصاص نیافته باشد." }, { status: 400 });
     return Response.json({ account }, { status: 201 });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
