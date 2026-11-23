@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { lockJournalAccounts, markPartyAccountsUsed } from "@/lib/journal-account-locks";
+import { isTransactionConflict } from "@/lib/prisma-errors";
 
 const amount = z.string().regex(/^(0|[1-9]\d{0,19})$/);
 const schema = z.object({
@@ -44,7 +45,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return Response.json({ entry: result.entry });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return Response.json({ error: "شمارهٔ سند در این سال مالی تکراری است." }, { status: 409 });
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
+    if (isTransactionConflict(error)) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Journal draft update failed", error);
     return Response.json({ error: "ویرایش پیش‌نویس انجام نشد." }, { status: 500 });
   }

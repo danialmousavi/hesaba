@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { lockJournalAccounts } from "@/lib/journal-account-locks";
-import { Prisma } from "@/generated/prisma/client";
+import { isTransactionConflict } from "@/lib/prisma-errors";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
@@ -33,7 +33,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ entry: result.entry });
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
+    if (isTransactionConflict(error)) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Journal posting failed", error);
     return Response.json({ error: "ثبت نهایی سند انجام نشد." }, { status: 500 });
   }

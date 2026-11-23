@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { isTransactionConflict } from "@/lib/prisma-errors";
 
 const inputSchema = z.strictObject({ purpose: z.enum(["RECEIVABLE", "PAYABLE"]), accountId: z.string().cuid().nullable() });
 const idSchema = z.string().cuid();
@@ -64,7 +65,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && ["P2002", "P2034"].includes(error.code)) return Response.json({ error: "تغییر هم‌زمان یا استفاده تکراری از حساب رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
+    if (isTransactionConflict(error) || (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) return Response.json({ error: "تغییر هم‌زمان یا استفاده تکراری از حساب رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Party account update failed", error);
     return Response.json({ error: "تغییر اتصال حساب انجام نشد." }, { status: 500 });
   }

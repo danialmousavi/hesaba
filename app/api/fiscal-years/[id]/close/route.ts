@@ -22,7 +22,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (!year) return { status: 404, error: "سال مالی پیدا نشد." } as const;
       if (year.status !== "OPEN") return { status: 409, error: "این سال مالی قبلاً بسته شده است." } as const;
       const drafts = await tx.journalEntry.count({ where: { organizationId: member.organizationId, fiscalYearId: id, status: "DRAFT" } });
-      if (drafts > 0) return { status: 409, error: `این سال مالی ${drafts.toLocaleString("fa-IR")} سند پیش‌نویس دارد؛ ابتدا وضعیت آن‌ها را تعیین کنید.` } as const;
+      const financialDrafts = await tx.financialTransaction.count({ where: { organizationId: member.organizationId, fiscalYearId: id, status: "DRAFT" } });
+      if (drafts > 0 || financialDrafts > 0) return { status: 409, error: `این سال مالی ${drafts.toLocaleString("fa-IR")} سند و ${financialDrafts.toLocaleString("fa-IR")} درآمد یا هزینه پیش‌نویس دارد؛ ابتدا وضعیت آن‌ها را تعیین کنید.` } as const;
       await tx.fiscalYear.update({ where: { id }, data: { status: "CLOSED" } });
       await tx.fiscalYearEvent.create({ data: { organizationId: member.organizationId, fiscalYearId: id, actorId: session.user.id, actorName: session.user.name, type: "CLOSED", details: { previousStatus: "OPEN", status: "CLOSED" } } });
       return { status: 200 } as const;
