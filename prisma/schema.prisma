@@ -68,6 +68,10 @@ enum FinancialPaymentMethod {
   OTHER
 }
 
+enum InvoiceStatus {
+  DRAFT
+}
+
 model User {
   id            String       @id @default(cuid())
   name          String
@@ -97,6 +101,7 @@ model Organization {
   products       Product[]
   partyAccountEvents PartyAccountEvent[]
   financialTransactions FinancialTransaction[]
+  invoices Invoice[]
 }
 
 model Product {
@@ -113,6 +118,7 @@ model Product {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  invoiceLines   InvoiceLine[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, code])
@@ -135,6 +141,7 @@ model Party {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   accountLinks   PartyAccount[]
   accountEvents  PartyAccountEvent[]
+  invoices       Invoice[]
 
   @@unique([organizationId, id])
   @@index([organizationId, name])
@@ -238,6 +245,7 @@ model FiscalYear {
   organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   journalEntries JournalEntry[]
   financialTransactions FinancialTransaction[]
+  invoices Invoice[]
 
   @@unique([organizationId, name])
   @@unique([organizationId, id])
@@ -307,6 +315,49 @@ model JournalLine {
 
   @@index([organizationId, entryId])
   @@index([organizationId, accountId])
+}
+
+model Invoice {
+  id               String        @id @default(cuid())
+  organizationId   String
+  fiscalYearId     String
+  customerId       String
+  customerName     String
+  date             DateTime      @db.Date
+  status           InvoiceStatus @default(DRAFT)
+  description      String?
+  revision         Int           @default(0)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fiscalYear       FiscalYear    @relation(fields: [organizationId, fiscalYearId], references: [organizationId, id], onDelete: Restrict)
+  customer         Party         @relation(fields: [organizationId, customerId], references: [organizationId, id], onDelete: Restrict)
+  lines            InvoiceLine[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, fiscalYearId, date])
+  @@index([organizationId, customerId, status])
+}
+
+model InvoiceLine {
+  id             String      @id @default(cuid())
+  organizationId String
+  invoiceId      String
+  productId      String
+  position       Int
+  productCode    String
+  productName    String
+  productType    ProductType
+  unit           String
+  quantity       Decimal     @db.Decimal(18, 3)
+  unitPrice      Decimal     @db.Decimal(20, 0)
+  discountAmount Decimal     @default(0) @db.Decimal(20, 0)
+  taxAmount      Decimal     @default(0) @db.Decimal(20, 0)
+  invoice        Invoice     @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Cascade)
+  product        Product     @relation(fields: [organizationId, productId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, invoiceId, position])
+  @@index([organizationId, productId])
 }
 
 model Membership {

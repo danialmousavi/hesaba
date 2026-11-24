@@ -19,6 +19,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Link href="/dashboard/products" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">کالا و خدمات</Link>
             <Link href="/dashboard/journal" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">اسناد حسابداری</Link>
             <Link href="/dashboard/transactions" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">درآمد و هزینه</Link>
+            <Link href="/dashboard/invoices" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">فاکتورهای فروش</Link>
             <Link href="/dashboard/reports/trial-balance" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">تراز آزمایشی</Link>
             <Link href="/dashboard/reports/general-ledger" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">دفتر کل</Link>
             <Link href="/dashboard/reports/profit-loss" className="whitespace-nowrap rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800">سود و زیان</Link>
