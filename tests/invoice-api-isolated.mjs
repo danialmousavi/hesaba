@@ -533,6 +533,19 @@ try {
   await assert.rejects(db.query('UPDATE "JournalLine" SET debit=1 WHERE "entryId"=$1', [closed.closing.entries.opening.id]), { code: "23514" });
   const reverseSystem = await fetch(`${base}/api/journal-entries/${closed.closing.entries.opening.id}/reverse`, { method: "POST", headers: headers(closingUser), body: JSON.stringify({ fiscalYearId: closed.closing.targetYear.id, date: "2027-01-01" }) });
   assert.equal(reverseSystem.status, 409);
+  if (process.env.RECEIPT_UI_BROWSER) {
+    const browserOrg = id(), browserYear = id(), browserEquity = id(), browserAsset = id(), browserEntry = id();
+    await db.query('INSERT INTO "Organization" (id,name,slug,"updatedAt") VALUES ($1,$1,$1,now())', [browserOrg]);
+    await db.query('UPDATE "Membership" SET "organizationId"=$1,role=\'ADMIN\' WHERE "userId"=$2', [browserOrg, other.id]);
+    await db.query('INSERT INTO "FiscalYear" (id,"organizationId",name,"startDate","endDate","updatedAt") VALUES ($1,$2,\'Browser year\',\'2026-01-01\',\'2026-12-31\',now())', [browserYear,browserOrg]);
+    for (const [accountId,type] of [[browserEquity,"EQUITY"],[browserAsset,"ASSET"]]) await db.query('INSERT INTO "LedgerAccount" (id,"organizationId",code,name,type,"updatedAt") VALUES ($1,$2,$1,$1,$3,now())', [accountId,browserOrg,type]);
+    await db.query('INSERT INTO "JournalEntry" (id,"organizationId","fiscalYearId",number,date,description,"updatedAt") VALUES ($1,$2,$3,1,\'2026-05-01\',\'Browser source\',now())', [browserEntry,browserOrg,browserYear]);
+    for (const [accountId,debit,credit] of [[browserAsset,100,0],[browserEquity,0,100]]) await db.query('INSERT INTO "JournalLine" (id,"organizationId","entryId","accountId",debit,credit) VALUES ($1,$2,$3,$4,$5,$6)', [id(),browserOrg,browserEntry,accountId,debit,credit]);
+    await db.query('UPDATE "JournalEntry" SET status=\'POSTED\' WHERE id=$1', [browserEntry]);
+    const { testJournalReversalBrowser } = await import("./journal-reversal-browser.mjs");
+    await testJournalReversalBrowser({ chromePath: process.env.RECEIPT_UI_BROWSER, base, cookie: other.cookie, closingYearId: browserYear, closingEquityId: browserEquity });
+    assert.equal((await db.query('SELECT count(*)::int AS n FROM "FiscalClosing" WHERE "sourceYearId"=$1', [browserYear])).rows[0].n, 1);
+  }
   const emptyOrg = id(), emptyYear = id(), emptyEquity = id(), emptyAsset = id();
   await db.query('INSERT INTO "Organization" (id,name,slug,"updatedAt") VALUES ($1,$1,$1,now())', [emptyOrg]);
   await db.query('UPDATE "Membership" SET "organizationId"=$1,role=\'ADMIN\' WHERE "userId"=$2', [emptyOrg, other.id]);

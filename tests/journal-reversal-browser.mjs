@@ -4,7 +4,7 @@ import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-export async function testJournalReversalBrowser({ chromePath, base, cookie, sourceId, invoiceId, paidInvoiceId }) {
+export async function testJournalReversalBrowser({ chromePath, base, cookie, sourceId, invoiceId, paidInvoiceId, closingYearId, closingEquityId }) {
   const root = await realpath(tmpdir());
   const profile = await mkdtemp(path.join(root, "hesaba-reversal-ui-"));
   const resolved = await realpath(profile);
@@ -27,6 +27,37 @@ export async function testJournalReversalBrowser({ chromePath, base, cookie, sou
     await call("Network.enable");
     for (const part of cookie.split("; ")) { const at = part.indexOf("="); if (at > 0) await call("Network.setCookie", { url: base, name: part.slice(0, at), value: part.slice(at + 1) }); }
     await call("Page.enable");
+    if (closingYearId) {
+      await call("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+      await call("Page.navigate", { url: `${base}/dashboard/fiscal-years` });
+      await until(`Array.from(document.querySelectorAll('button')).some(x => x.innerText === 'اختتامیه و انتقال مانده')`, "Closing panel did not load");
+      await evaluate(`Array.from(document.querySelectorAll('button')).find(x => x.innerText === 'اختتامیه و انتقال مانده').click()`);
+      await until(`document.body.innerText.includes('اختتامیه «')`, "Closing form did not open");
+      assert.ok(await evaluate(`document.documentElement.scrollWidth <= window.innerWidth + 1`), "Fiscal years page should fit mobile width");
+      await evaluate(`Array.from(document.querySelectorAll('button')).find(x => x.innerText === 'دریافت پیش‌نمایش').click()`);
+      await until(`document.body.innerText.includes('نام سال جدید، حساب نتیجه دوره')`, "Closing validation did not appear");
+      await evaluate(`(() => { const name = document.querySelector('input[placeholder="نام سال مالی جدید"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(name, 'سال بعد'); name.dispatchEvent(new Event('input', { bubbles: true })); const select = Array.from(document.querySelectorAll('select')).find(x => Array.from(x.options).some(o => o.value === ${JSON.stringify(closingEquityId)})); select.value = ${JSON.stringify(closingEquityId)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+      const position = await evaluate(`(() => { const el = document.querySelector('input[placeholder="انتخاب تاریخ پایان شمسی"]'); el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+      await call("Input.dispatchMouseEvent", { type: "mousePressed", ...position, button: "left", clickCount: 1 });
+      await call("Input.dispatchMouseEvent", { type: "mouseReleased", ...position, button: "left", clickCount: 1 });
+      await until(`!!document.querySelector('.rmdp-day:not(.rmdp-disabled):not(.rmdp-deactive) span')`, "Closing calendar did not open");
+      await evaluate(`document.querySelector('.rmdp-day:not(.rmdp-disabled):not(.rmdp-deactive) span').click()`);
+      await evaluate(`Array.from(document.querySelectorAll('button')).find(x => x.innerText === 'دریافت پیش‌نمایش').click()`);
+      try { await until(`document.body.innerText.includes('پیش‌نمایش اختتامیه') && document.body.innerText.includes('تأیید نهایی اختتامیه و انتقال')`, "Closing preview did not load"); }
+      catch (error) { console.error("Closing page:", await evaluate(`JSON.stringify({ text: document.body.innerText, fields: Array.from(document.querySelectorAll('input,select')).map(x => ({ placeholder: x.placeholder, value: x.value })) })`)); throw error; }
+      assert.ok(await evaluate(`document.body.innerText.includes('بستن حساب‌های موقت') && document.body.innerText.includes('افتتاحیه سال جدید')`));
+      await evaluate(`(() => { const original = window.fetch; window.__closingFetch = original; window.fetch = async (...args) => { const response = await original(...args); if (String(args[0]).endsWith('/closing') && args[1]?.method === 'POST') throw new Error('simulated lost response'); return response; }; })()`);
+      await evaluate(`Array.from(document.querySelectorAll('button')).find(x => x.innerText === 'تأیید نهایی اختتامیه و انتقال').click()`);
+      await until(`Array.from(document.querySelectorAll('button')).some(x => x.innerText === 'بررسی دوباره همین درخواست' && !x.disabled)`, "Uncertain result recovery did not appear");
+      await evaluate(`window.fetch = window.__closingFetch`);
+      await evaluate(`Array.from(document.querySelectorAll('button')).find(x => x.innerText === 'بررسی دوباره همین درخواست').click()`);
+      await until(`document.body.innerText.includes('اختتامیه و انتقال مانده ثبت شده است.')`, "Closing replay did not show result");
+      assert.ok(await evaluate(`document.body.innerText.includes('افتتاحیه سال جدید') && document.body.innerText.includes('سند شماره')`));
+      await call("Page.reload");
+      await until(`!!document.body && document.body.innerText.includes('اختتامیه و انتقال مانده ثبت شده است.')`, "Closing history did not survive reload");
+      console.log("Fiscal closing browser checks passed.");
+      return;
+    }
     if (invoiceId) {
       await call("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
       await call("Page.navigate", { url: `${base}/dashboard/invoices` });
