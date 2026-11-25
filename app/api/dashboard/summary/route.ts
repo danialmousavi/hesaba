@@ -14,8 +14,8 @@ export async function GET(request: Request) {
       const year = await tx.fiscalYear.findFirst({ where: { id: yearId.data, organizationId: member.organizationId }, select: { id: true, name: true, startDate: true, endDate: true, status: true } });
       if (!year) return null;
       const [revenue, expense, counts, recent] = await Promise.all([
-        tx.journalLine.aggregate({ where: { organizationId: member.organizationId, entry: { organizationId: member.organizationId, fiscalYearId: year.id, status: "POSTED" }, account: { organizationId: member.organizationId, type: "REVENUE" } }, _sum: { debit: true, credit: true } }),
-        tx.journalLine.aggregate({ where: { organizationId: member.organizationId, entry: { organizationId: member.organizationId, fiscalYearId: year.id, status: "POSTED" }, account: { organizationId: member.organizationId, type: "EXPENSE" } }, _sum: { debit: true, credit: true } }),
+        tx.journalLine.aggregate({ where: { organizationId: member.organizationId, entry: { organizationId: member.organizationId, fiscalYearId: year.id, status: "POSTED", kind: { not: "CLOSING_TEMPORARY" } }, account: { organizationId: member.organizationId, type: "REVENUE" } }, _sum: { debit: true, credit: true } }),
+        tx.journalLine.aggregate({ where: { organizationId: member.organizationId, entry: { organizationId: member.organizationId, fiscalYearId: year.id, status: "POSTED", kind: { not: "CLOSING_TEMPORARY" } }, account: { organizationId: member.organizationId, type: "EXPENSE" } }, _sum: { debit: true, credit: true } }),
         tx.journalEntry.groupBy({ by: ["status"], where: { organizationId: member.organizationId, fiscalYearId: year.id }, _count: { _all: true } }),
         tx.journalEntry.findMany({ where: { organizationId: member.organizationId, fiscalYearId: year.id, status: "POSTED" }, orderBy: [{ date: "desc" }, { number: "desc" }], take: 5, select: { id: true, number: true, date: true, description: true } }),
       ]);

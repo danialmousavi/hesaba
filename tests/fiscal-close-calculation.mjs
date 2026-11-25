@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import { calculateFiscalClose, ClosingCalculationError } from "../lib/fiscal-close-calculation.ts";
+
+const account = (id, type, debit, credit) => ({ id, code: id, name: id, type, debit, credit });
+const basic = [account("cash", "ASSET", "100", "0"), account("liability", "LIABILITY", "0", "20"), account("equity", "EQUITY", "0", "30"), account("revenue", "REVENUE", "0", "70"), account("expense", "EXPENSE", "20", "0")];
+const result = calculateFiscalClose(basic, "equity");
+const find = (lines, id) => lines.find((line) => line.accountId === id);
+assert.equal(result.result, "50");
+assert.deepEqual(find(result.temporaryLines, "equity"), { accountId: "equity", debit: "0", credit: "50" });
+assert.deepEqual(find(result.closingLines, "cash"), { accountId: "cash", debit: "0", credit: "100" });
+assert.deepEqual(find(result.openingLines, "equity"), { accountId: "equity", debit: "0", credit: "80" });
+assert.deepEqual(result.openingLines.map((line) => [line.accountId, line.debit, line.credit]), result.closingLines.map((line) => [line.accountId, line.credit, line.debit]));
+const zero = calculateFiscalClose([account("equity", "EQUITY", "0", "0")], "equity");
+assert.deepEqual([zero.temporaryLines, zero.closingLines, zero.openingLines], [[], [], []]);
+const loss = calculateFiscalClose([account("equity", "EQUITY", "0", "0"), account("expense", "EXPENSE", "10", "0"), account("asset", "ASSET", "0", "10")], "equity");
+assert.equal(loss.result, "-10");
+assert.deepEqual(find(loss.openingLines, "asset"), { accountId: "asset", debit: "0", credit: "10" });
+const equal = calculateFiscalClose([account("equity", "EQUITY", "0", "0"), account("income", "REVENUE", "0", "10"), account("expense", "EXPENSE", "10", "0")], "equity");
+assert.equal(equal.result, "0");
+assert.equal(equal.temporaryLines.length, 2);
+assert.deepEqual(equal.openingLines, []);
+const large = "9007199254740993";
+assert.equal(find(calculateFiscalClose([account("equity", "EQUITY", "0", large), account("asset", "ASSET", large, "0")], "equity").openingLines, "asset").debit, large);
+assert.throws(() => calculateFiscalClose([account("equity", "EQUITY", "0", "0"), account("asset", "ASSET", "1", "0")], "equity"), ClosingCalculationError);
+assert.throws(() => calculateFiscalClose([account("equity", "EQUITY", "0", "0"), account("asset", "ASSET", "100000000000000000000", "0"), account("debt", "LIABILITY", "0", "100000000000000000000")], "equity"), ClosingCalculationError);
+assert.throws(() => calculateFiscalClose([account("equity", "EQUITY", "0", "100"), ...Array.from({ length: 100 }, (_, i) => account(String(i), "ASSET", "1", "0"))], "equity"), ClosingCalculationError);
+assert.throws(() => calculateFiscalClose([...basic, basic[0]], "equity"), ClosingCalculationError);
+console.log("Fiscal closing calculation checks passed.");

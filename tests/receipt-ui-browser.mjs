@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 // Optional interactive check: a fresh temporary Chrome profile and the isolated test database only.
-export async function testReceiptBrowser({ chromePath, base, cookie, ownerId, organizationId, customerId, cashId }) {
+export async function testReceiptBrowser({ chromePath, base, cookie, ownerId, organizationId, customerId, supplierId, cashId, fiscalYearId }) {
   const root = await realpath(tmpdir());
   const profile = await mkdtemp(path.join(root, "hesaba-receipt-ui-"));
   const resolved = await realpath(profile);
@@ -67,7 +67,36 @@ export async function testReceiptBrowser({ chromePath, base, cookie, ownerId, or
     await call("Page.reload");
     await until(`!!document.body && document.body.innerText.includes('درخواست با نتیجه نامشخص')`, "Recovery state did not survive reload");
     assert.ok(await evaluate(`document.body.innerText.includes('بررسی دوباره همین درخواست')`));
-    console.log("Receipt browser submission and recovery passed.");
+    await call("Page.navigate", { url: `${base}/dashboard/supplier-payments` });
+    await until(`!!document.body && document.querySelectorAll('select').length >= 3 && !document.body.innerText.includes('در حال آماده‌سازی فرم')`, "Supplier payment form did not load");
+    await evaluate(`(() => { const supplier = document.querySelectorAll('select')[0]; supplier.value = ${JSON.stringify(supplierId)}; supplier.dispatchEvent(new Event('change', { bubbles: true })); const account = document.querySelectorAll('select')[1]; account.value = ${JSON.stringify(cashId)}; account.dispatchEvent(new Event('change', { bubbles: true })); const amount = document.querySelector('input[inputmode="numeric"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(amount, '40'); amount.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    const paymentPosition = await evaluate(`(() => { const el = document.querySelector('input[placeholder="انتخاب تاریخ شمسی"]'); el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    await call("Input.dispatchMouseEvent", { type: "mousePressed", x: paymentPosition.x, y: paymentPosition.y, button: "left", clickCount: 1 });
+    await call("Input.dispatchMouseEvent", { type: "mouseReleased", x: paymentPosition.x, y: paymentPosition.y, button: "left", clickCount: 1 });
+    await until(`!!document.querySelector('.rmdp-day:not(.rmdp-disabled):not(.rmdp-deactive) span')`, "Payment calendar did not open");
+    await evaluate(`document.querySelector('.rmdp-day:not(.rmdp-disabled):not(.rmdp-deactive) span').click()`);
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(x => x.innerText.includes('پیش‌نمایش پرداخت')).click()`);
+    await until(`document.body.innerText.includes('پیش‌نمایش سند پرداخت')`, "Payment preview did not appear");
+    assert.ok(await evaluate(`document.body.innerText.includes('بدهکار · پرداختنی') && document.body.innerText.includes('بستانکار · حساب تسویه')`));
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(x => x.innerText.includes('تأیید و ثبت پرداخت')).click()`);
+    await until(`document.body.innerText.includes('پرداخت ثبت شد')`, "Payment was not submitted from the form");
+    const paymentStorageKey = `hesaba-supplier-payment:${ownerId}:${organizationId}`;
+    const paymentPayload = { requestKey: "22222222-2222-4222-8222-222222222222", fiscalYearId, partyId: supplierId, date: "2026-05-15", amount: "40", method: "CASH", settlementAccountId: cashId, description: null };
+    await evaluate(`sessionStorage.setItem(${JSON.stringify(paymentStorageKey)}, ${JSON.stringify(JSON.stringify(paymentPayload))})`);
+    await call("Page.reload");
+    await until(`!!document.body && document.body.innerText.includes('درخواست با نتیجه نامشخص')`, "Payment recovery state did not survive reload");
+    assert.ok(await evaluate(`document.body.innerText.includes('بررسی دوباره همین درخواست')`));
+    await call("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+    await call("Page.navigate", { url: `${base}/dashboard/reports/party-balances` });
+    await until(`!!document.body && Array.from(document.querySelectorAll('h3')).some(x => x.innerText === 'Customer')`, "Party balances did not load");
+    assert.ok(await evaluate(`document.body.innerText.includes('بدون سند افتتاحیه') && document.body.innerText.includes('حساب دریافتنی')`));
+    assert.ok(await evaluate(`document.documentElement.scrollWidth <= window.innerWidth + 1`), "Report should fit mobile width");
+    await evaluate(`(() => { const row = Array.from(document.querySelectorAll('li')).find(x => x.querySelector('h3')?.innerText === 'Customer' && Array.from(x.querySelectorAll('span')).some(s => s.innerText === 'فعال')); row.querySelector('button').click(); })()`);
+    await until(`document.body.innerText.includes('فاکتور شماره ۱') && document.body.innerText.includes('مانده تا پایان سال')`, "Party invoice balances did not load");
+    await evaluate(`(() => { const input = document.querySelector('input[placeholder="جست‌وجوی نام"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Customer'); input.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('form button[type="submit"], form button:not([type])').click(); })()`);
+    await until(`!!document.body && document.body.innerText.includes('۲ شخص')`, "Party filter did not apply");
+    assert.ok(await evaluate(`Array.from(document.querySelectorAll('h3')).some(x => x.innerText === 'Customer')`));
+    console.log("Receipt, supplier payment and party report browser checks passed.");
   } finally {
     socket?.close();
     if (chrome.exitCode === null) { chrome.kill(); await new Promise((resolve) => { chrome.once("exit", resolve); setTimeout(resolve, 3000); }); }

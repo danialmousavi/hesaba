@@ -7,7 +7,7 @@ import { isTransactionConflict } from "@/lib/prisma-errors";
 
 const querySchema = z.strictObject({
   fiscalYearId: z.string().cuid().optional(),
-  status: z.enum(["draft", "issued", "all"]).default("draft"),
+  status: z.enum(["draft", "issued", "cancelled", "all"]).default("draft"),
   page: z.coerce.number().int().min(1).max(10000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   try {
     const result = await prisma.$transaction(async (tx) => {
       if (fiscalYearId && !await tx.fiscalYear.findFirst({ where: { id: fiscalYearId, organizationId: member.organizationId }, select: { id: true } })) return null;
-      const where: Prisma.InvoiceWhereInput = { organizationId: member.organizationId, ...(status === "all" ? {} : { status: status === "draft" ? "DRAFT" : "ISSUED" }), ...(fiscalYearId ? { fiscalYearId } : {}) };
+      const where: Prisma.InvoiceWhereInput = { organizationId: member.organizationId, ...(status === "all" ? {} : { status: status === "draft" ? "DRAFT" : status === "issued" ? "ISSUED" : "CANCELLED" }), ...(fiscalYearId ? { fiscalYearId } : {}) };
       const [invoices, total] = await Promise.all([
         tx.invoice.findMany({ where, select: invoiceFields, orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * pageSize, take: pageSize }),
         tx.invoice.count({ where }),

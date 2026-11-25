@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     const report = await prisma.$transaction(async (tx) => {
       const year = await tx.fiscalYear.findFirst({ where: { id: parsed.data, organizationId: member.organizationId }, select: { id: true, name: true, startDate: true, endDate: true, status: true } });
       if (!year) return null;
-      const totals = await tx.journalLine.groupBy({ by: ["accountId"], where: { organizationId: member.organizationId, entry: { organizationId: member.organizationId, fiscalYearId: year.id, status: "POSTED" }, account: { organizationId: member.organizationId, type: { in: ["REVENUE", "EXPENSE"] } } }, _sum: { debit: true, credit: true } });
+      const totals = await tx.journalLine.groupBy({ by: ["accountId"], where: { organizationId: member.organizationId, entry: { organizationId: member.organizationId, fiscalYearId: year.id, status: "POSTED", kind: { not: "CLOSING_TEMPORARY" } }, account: { organizationId: member.organizationId, type: { in: ["REVENUE", "EXPENSE"] } } }, _sum: { debit: true, credit: true } });
       const accounts = await tx.ledgerAccount.findMany({ where: { organizationId: member.organizationId, id: { in: totals.map((item) => item.accountId) } }, select: { id: true, code: true, name: true, type: true } });
       const byId = new Map(accounts.map((account) => [account.id, account]));
       let revenue = 0n, expenses = 0n;

@@ -30,9 +30,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!initial) return { status: 404, error: "سند پیدا نشد." } as const;
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${initial.fiscalYearId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM "JournalEntry" WHERE id = ${id} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
-      const entry = await tx.journalEntry.findFirst({ where: { id, organizationId: member.organizationId }, select: { status: true, fiscalYear: { select: { status: true, startDate: true, endDate: true } } } });
+      const entry = await tx.journalEntry.findFirst({ where: { id, organizationId: member.organizationId }, select: { status: true, reversalOf: { select: { sourceEntryId: true } }, fiscalYear: { select: { status: true, startDate: true, endDate: true } } } });
       if (!entry) return { status: 404, error: "سند پیدا نشد." } as const;
       if (entry.status !== "DRAFT") return { status: 409, error: "سند ثبت‌شده قابل ویرایش نیست." } as const;
+      if (entry.reversalOf) return { status: 409, error: "ردیف‌ها و مشخصات پیش‌نویس برگشتی قابل ویرایش نیستند؛ در صورت نیاز پیش‌نویس را حذف و دوباره ایجاد کنید." } as const;
       if (entry.fiscalYear.status !== "OPEN" || date < entry.fiscalYear.startDate || date > entry.fiscalYear.endDate) return { status: 409, error: "سال مالی بسته است یا تاریخ خارج از محدودهٔ آن است." } as const;
       const ids = await lockJournalAccounts(tx, member.organizationId, parsed.data.lines.map((line) => line.accountId));
       if (!ids) return { status: 400, error: "حساب یا شخص متصل معتبر و فعال نیست؛ در صورت تغییر هم‌زمان دوباره تلاش کنید." } as const;
@@ -64,10 +65,14 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       if (!initial) return { status: 404, error: "سند پیدا نشد." } as const;
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${initial.fiscalYearId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM "JournalEntry" WHERE id = ${id} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
-      const entry = await tx.journalEntry.findFirst({ where: { id, organizationId: member.organizationId }, select: { status: true, fiscalYear: { select: { status: true } } } });
+      const entry = await tx.journalEntry.findFirst({ where: { id, organizationId: member.organizationId }, select: { status: true, reversalOf: { select: { sourceEntryId: true } }, fiscalYear: { select: { status: true } } } });
       if (!entry) return { status: 404, error: "سند پیدا نشد." } as const;
       if (entry.status !== "DRAFT") return { status: 409, error: "سند ثبت‌شده قابل حذف نیست." } as const;
       if (entry.fiscalYear.status !== "OPEN") return { status: 409, error: "حذف پیش‌نویس در سال مالی بسته مجاز نیست." } as const;
+      if (entry.reversalOf) {
+        await tx.journalReversal.delete({ where: { organizationId_sourceEntryId: { organizationId: member.organizationId, sourceEntryId: entry.reversalOf.sourceEntryId } } });
+        await tx.journalEvent.create({ data: { organizationId: member.organizationId, entryId: entry.reversalOf.sourceEntryId, actorId: session.user.id, actorName: session.user.name, action: "REVERSAL_DRAFT_DELETED" } });
+      }
       await tx.journalLine.deleteMany({ where: { organizationId: member.organizationId, entryId: id } });
       await tx.journalEntry.delete({ where: { id } });
       return { status: 200 } as const;

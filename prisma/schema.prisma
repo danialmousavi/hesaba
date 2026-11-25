@@ -36,6 +36,13 @@ enum JournalEntryStatus {
   POSTED
 }
 
+enum JournalEntryKind {
+  NORMAL
+  CLOSING_TEMPORARY
+  CLOSING_PERMANENT
+  OPENING
+}
+
 enum ProductType {
   GOODS
   SERVICE
@@ -71,6 +78,7 @@ enum FinancialPaymentMethod {
 enum InvoiceStatus {
   DRAFT
   ISSUED
+  CANCELLED
 }
 
 enum PaymentType {
@@ -261,6 +269,8 @@ model FiscalYear {
   financialTransactions FinancialTransaction[]
   invoices Invoice[]
   payments Payment[]
+  closingSource FiscalClosing? @relation("ClosingSource")
+  closingTarget FiscalClosing? @relation("ClosingTarget")
 
   @@unique([organizationId, name])
   @@unique([organizationId, id])
@@ -276,6 +286,7 @@ model JournalEntry {
   date           DateTime           @db.Date
   description    String
   status         JournalEntryStatus @default(DRAFT)
+  kind           JournalEntryKind @default(NORMAL)
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
   organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -285,11 +296,46 @@ model JournalEntry {
   financialTransaction FinancialTransaction?
   invoice Invoice?
   payment Payment?
+  reversal JournalReversal? @relation("OriginalJournal")
+  reversalOf JournalReversal? @relation("ReversalJournal")
+  invoiceCancellation InvoiceCancellation?
+  closingTemporary FiscalClosing? @relation("ClosingTemporary")
+  closingPermanent FiscalClosing? @relation("ClosingPermanent")
+  closingOpening FiscalClosing? @relation("ClosingOpening")
 
   @@unique([organizationId, fiscalYearId, number])
   @@unique([organizationId, id])
   @@unique([organizationId, fiscalYearId, id])
   @@index([organizationId, date])
+}
+
+model FiscalClosing {
+  id               String @id @default(cuid())
+  organizationId   String
+  sourceYearId     String
+  targetYearId     String
+  temporaryEntryId String?
+  permanentEntryId String?
+  openingEntryId   String?
+  requestKey       String
+  requestHash      String
+  previewFingerprint String
+  actorId          String
+  actorName        String
+  summary          Json
+  createdAt        DateTime @default(now())
+  sourceYear FiscalYear @relation("ClosingSource", fields: [organizationId, sourceYearId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  targetYear FiscalYear @relation("ClosingTarget", fields: [organizationId, targetYearId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict)
+  temporaryEntry JournalEntry? @relation("ClosingTemporary", fields: [organizationId, sourceYearId, temporaryEntryId], references: [organizationId, fiscalYearId, id], onDelete: Restrict, onUpdate: Restrict)
+  permanentEntry JournalEntry? @relation("ClosingPermanent", fields: [organizationId, sourceYearId, permanentEntryId], references: [organizationId, fiscalYearId, id], onDelete: Restrict, onUpdate: Restrict)
+  openingEntry JournalEntry? @relation("ClosingOpening", fields: [organizationId, targetYearId, openingEntryId], references: [organizationId, fiscalYearId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([organizationId, requestKey])
+  @@unique([organizationId, sourceYearId])
+  @@unique([organizationId, targetYearId])
+  @@unique([organizationId, sourceYearId, temporaryEntryId])
+  @@unique([organizationId, sourceYearId, permanentEntryId])
+  @@unique([organizationId, targetYearId, openingEntryId])
 }
 
 model FinancialTransaction {
@@ -334,6 +380,20 @@ model JournalLine {
   @@index([organizationId, accountId])
 }
 
+model JournalReversal {
+  organizationId  String
+  sourceEntryId   String
+  reversalEntryId String
+  actorId         String
+  actorName       String
+  createdAt       DateTime     @default(now())
+  source          JournalEntry @relation("OriginalJournal", fields: [organizationId, sourceEntryId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict, map: "JournalReversal_source_fkey")
+  reversal        JournalEntry @relation("ReversalJournal", fields: [organizationId, reversalEntryId], references: [organizationId, id], onDelete: Cascade, onUpdate: Restrict, map: "JournalReversal_reversal_fkey")
+
+  @@id([organizationId, sourceEntryId])
+  @@unique([organizationId, reversalEntryId])
+}
+
 model Invoice {
   id               String        @id @default(cuid())
   organizationId   String
@@ -354,6 +414,7 @@ model Invoice {
   journalEntry     JournalEntry? @relation(fields: [organizationId, fiscalYearId, journalEntryId], references: [organizationId, fiscalYearId, id], onDelete: Restrict, map: "Invoice_org_year_entry_fkey")
   lines            InvoiceLine[]
   allocations      PaymentAllocation[]
+  cancellation     InvoiceCancellation?
 
   @@unique([organizationId, id])
   @@unique([organizationId, customerId, id], map: "Invoice_org_customer_id_key")
@@ -361,6 +422,21 @@ model Invoice {
   @@unique([organizationId, fiscalYearId, journalEntryId], map: "Invoice_org_year_entry_key")
   @@index([organizationId, fiscalYearId, date])
   @@index([organizationId, customerId, status])
+}
+
+model InvoiceCancellation {
+  organizationId  String
+  invoiceId       String
+  reversalEntryId String
+  reason          String
+  actorId         String
+  actorName       String
+  createdAt       DateTime     @default(now())
+  invoice         Invoice      @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict, map: "InvoiceCancellation_invoice_fkey")
+  reversalEntry   JournalEntry @relation(fields: [organizationId, reversalEntryId], references: [organizationId, id], onDelete: Restrict, onUpdate: Restrict, map: "InvoiceCancellation_journal_fkey")
+
+  @@id([organizationId, invoiceId])
+  @@unique([organizationId, reversalEntryId])
 }
 
 model InvoiceLine {

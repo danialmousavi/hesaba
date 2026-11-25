@@ -24,6 +24,8 @@ export async function invoiceMembership(request: Request) {
 export const invoiceFields = {
   id: true, fiscalYearId: true, customerId: true, customerName: true, date: true,
   status: true, description: true, revision: true, number: true, journalEntryId: true, createdAt: true, updatedAt: true,
+  cancellation: { select: { reversalEntryId: true, reason: true, actorName: true, createdAt: true, reversalEntry: { select: { number: true, date: true } } } },
+  _count: { select: { allocations: true } },
   lines: { orderBy: { position: "asc" }, select: { id: true, position: true, productId: true, productCode: true, productName: true, productType: true, unit: true, quantity: true, unitPrice: true, discountAmount: true, taxAmount: true } },
 } satisfies Prisma.InvoiceSelect;
 
@@ -32,5 +34,5 @@ type Invoice = Prisma.InvoiceGetPayload<{ select: typeof invoiceFields }>;
 export function serializeInvoice(invoice: Invoice) {
   const lines = invoice.lines.map((line) => ({ ...line, quantity: line.quantity.toFixed(3), unitPrice: line.unitPrice.toFixed(0), discountAmount: line.discountAmount.toFixed(0), taxAmount: line.taxAmount.toFixed(0) }));
   const calculation = calculateInvoice(lines);
-  return { ...invoice, date: invoice.date.toISOString().slice(0, 10), lines: lines.map((line, index) => ({ ...line, amounts: calculation.lines[index] })), totals: calculation.totals };
+  return { ...invoice, allocationCount: invoice._count.allocations, cancellation: invoice.cancellation ? { ...invoice.cancellation, reversalEntry: { ...invoice.cancellation.reversalEntry, date: invoice.cancellation.reversalEntry.date.toISOString().slice(0, 10) } } : null, date: invoice.date.toISOString().slice(0, 10), lines: lines.map((line, index) => ({ ...line, amounts: calculation.lines[index] })), totals: calculation.totals };
 }

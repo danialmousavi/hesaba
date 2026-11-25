@@ -33,7 +33,7 @@ export async function GET(request: Request) {
         JOIN "JournalEntry" e ON e.id = l."entryId" AND e."organizationId" = l."organizationId"
         JOIN "LedgerAccount" a ON a.id = l."accountId" AND a."organizationId" = l."organizationId"
         WHERE l."organizationId" = ${member.organizationId} AND e."fiscalYearId" = ${fiscalYear.id}
-          AND e.status = 'POSTED' AND a.type IN ('REVENUE', 'EXPENSE')
+          AND e.status = 'POSTED' AND e.kind <> 'CLOSING_TEMPORARY' AND a.type IN ('REVENUE', 'EXPENSE')
         GROUP BY e.date ORDER BY e.date`;
       const months = new Map<string, { year: number; month: number; revenue: bigint; expenses: bigint }>();
       for (const day of days) {

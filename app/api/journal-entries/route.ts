@@ -28,7 +28,7 @@ async function member(request: Request) {
 export async function GET(request: Request) {
   const membership = await member(request);
   if (!membership) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
-  const entries = await prisma.journalEntry.findMany({ where: { organizationId: membership.organizationId }, orderBy: [{ date: "desc" }, { number: "desc" }], select: { id: true, fiscalYearId: true, number: true, date: true, description: true, status: true, lines: { select: { id: true, accountId: true, description: true, debit: true, credit: true } } } });
+  const entries = await prisma.journalEntry.findMany({ where: { organizationId: membership.organizationId }, orderBy: [{ date: "desc" }, { number: "desc" }], select: { id: true, kind: true, fiscalYearId: true, number: true, date: true, description: true, status: true, reversal: { select: { reversalEntryId: true } }, reversalOf: { select: { sourceEntryId: true } }, invoice: { select: { id: true } }, payment: { select: { id: true } }, financialTransaction: { select: { id: true } }, lines: { select: { id: true, accountId: true, description: true, debit: true, credit: true } } } });
   return Response.json({ entries }, { headers: { "Cache-Control": "no-store" } });
 }
 

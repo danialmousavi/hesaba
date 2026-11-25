@@ -16,10 +16,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (!initial) return { status: 404, error: "سند پیدا نشد." } as const;
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${initial.fiscalYearId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM "JournalEntry" WHERE id = ${id} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
-      const entry = await tx.journalEntry.findFirst({ where: { id, organizationId: member.organizationId }, select: { status: true, date: true, fiscalYear: { select: { status: true, startDate: true, endDate: true } }, lines: { select: { accountId: true, debit: true, credit: true } } } });
+      const entry = await tx.journalEntry.findFirst({ where: { id, organizationId: member.organizationId }, select: { status: true, date: true, fiscalYear: { select: { status: true, startDate: true, endDate: true } }, lines: { select: { accountId: true, description: true, debit: true, credit: true } }, reversalOf: { select: { source: { select: { status: true, date: true, reversalOf: { select: { sourceEntryId: true } }, invoice: { select: { id: true } }, payment: { select: { id: true } }, financialTransaction: { select: { id: true } }, lines: { select: { accountId: true, description: true, debit: true, credit: true } } } } } } } });
       if (!entry) return { status: 404, error: "سند پیدا نشد." } as const;
       if (entry.status !== "DRAFT") return { status: 409, error: "سند قبلاً ثبت نهایی شده است." } as const;
       if (entry.fiscalYear.status !== "OPEN" || entry.date < entry.fiscalYear.startDate || entry.date > entry.fiscalYear.endDate) return { status: 409, error: "سال مالی بسته است یا تاریخ سند در محدودهٔ آن نیست." } as const;
+      if (entry.reversalOf) {
+        const source = entry.reversalOf.source;
+        if (source.status !== "POSTED" || source.date > entry.date || source.reversalOf || source.invoice || source.payment || source.financialTransaction) return { status: 409, error: "سند اصلی برای ثبت برگشت معتبر نیست." } as const;
+        const original = source.lines.map((line) => JSON.stringify([line.accountId, line.description, line.credit.toFixed(0), line.debit.toFixed(0)])).sort();
+        const reversed = entry.lines.map((line) => JSON.stringify([line.accountId, line.description, line.debit.toFixed(0), line.credit.toFixed(0)])).sort();
+        if (original.length !== reversed.length || original.some((line, index) => line !== reversed[index])) return { status: 409, error: "ردیف‌های برگشت با سند اصلی مطابقت ندارند." } as const;
+      }
       if (entry.lines.length < 2) return { status: 400, error: "سند باید حداقل دو ردیف داشته باشد." } as const;
       let debit = 0n, credit = 0n;
       for (const line of entry.lines) { debit += BigInt(line.debit.toFixed(0)); credit += BigInt(line.credit.toFixed(0)); }
