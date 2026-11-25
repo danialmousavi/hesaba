@@ -19,7 +19,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const id = z.string().cuid().safeParse((await params).id);
   if (!id.success) return Response.json({ error: "شناسه فاکتور معتبر نیست." }, { status: 400 });
   try {
-    const invoice = await prisma.invoice.findFirst({ where: { id: id.data, organizationId: member.organizationId, status: "DRAFT" }, select: invoiceFields });
+    const invoice = await prisma.invoice.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: invoiceFields });
     if (!invoice) return Response.json({ error: "فاکتور پیدا نشد." }, { status: 404 });
     return Response.json({ invoice: serializeInvoice(invoice) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

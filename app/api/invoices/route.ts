@@ -7,6 +7,7 @@ import { isTransactionConflict } from "@/lib/prisma-errors";
 
 const querySchema = z.strictObject({
   fiscalYearId: z.string().cuid().optional(),
+  status: z.enum(["draft", "issued", "all"]).default("draft"),
   page: z.coerce.number().int().min(1).max(10000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -16,11 +17,11 @@ export async function GET(request: Request) {
   if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(request.url).searchParams.entries()));
   if (!parsed.success) return Response.json({ error: "پارامترهای فهرست معتبر نیستند." }, { status: 400 });
-  const { fiscalYearId, page, pageSize } = parsed.data;
+  const { fiscalYearId, status, page, pageSize } = parsed.data;
   try {
     const result = await prisma.$transaction(async (tx) => {
       if (fiscalYearId && !await tx.fiscalYear.findFirst({ where: { id: fiscalYearId, organizationId: member.organizationId }, select: { id: true } })) return null;
-      const where: Prisma.InvoiceWhereInput = { organizationId: member.organizationId, status: "DRAFT", ...(fiscalYearId ? { fiscalYearId } : {}) };
+      const where: Prisma.InvoiceWhereInput = { organizationId: member.organizationId, ...(status === "all" ? {} : { status: status === "draft" ? "DRAFT" : "ISSUED" }), ...(fiscalYearId ? { fiscalYearId } : {}) };
       const [invoices, total] = await Promise.all([
         tx.invoice.findMany({ where, select: invoiceFields, orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * pageSize, take: pageSize }),
         tx.invoice.count({ where }),

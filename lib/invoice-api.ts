@@ -23,7 +23,7 @@ export async function invoiceMembership(request: Request) {
 
 export const invoiceFields = {
   id: true, fiscalYearId: true, customerId: true, customerName: true, date: true,
-  status: true, description: true, revision: true, createdAt: true, updatedAt: true,
+  status: true, description: true, revision: true, number: true, journalEntryId: true, createdAt: true, updatedAt: true,
   lines: { orderBy: { position: "asc" }, select: { id: true, position: true, productId: true, productCode: true, productName: true, productType: true, unit: true, quantity: true, unitPrice: true, discountAmount: true, taxAmount: true } },
 } satisfies Prisma.InvoiceSelect;
 

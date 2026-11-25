@@ -24,7 +24,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const drafts = await tx.journalEntry.count({ where: { organizationId: member.organizationId, fiscalYearId: id, status: "DRAFT" } });
       const financialDrafts = await tx.financialTransaction.count({ where: { organizationId: member.organizationId, fiscalYearId: id, status: "DRAFT" } });
       const invoiceDrafts = await tx.invoice.count({ where: { organizationId: member.organizationId, fiscalYearId: id, status: "DRAFT" } });
-      if (drafts > 0 || financialDrafts > 0 || invoiceDrafts > 0) return { status: 409, error: `این سال مالی ${drafts.toLocaleString("fa-IR")} سند، ${financialDrafts.toLocaleString("fa-IR")} درآمد یا هزینه و ${invoiceDrafts.toLocaleString("fa-IR")} فاکتور پیش‌نویس دارد؛ ابتدا وضعیت آن‌ها را تعیین کنید.` } as const;
+      const paymentDrafts = await tx.payment.count({ where: { organizationId: member.organizationId, fiscalYearId: id, status: "DRAFT" } });
+      if (drafts > 0 || financialDrafts > 0 || invoiceDrafts > 0 || paymentDrafts > 0) return { status: 409, error: `این سال مالی ${drafts.toLocaleString("fa-IR")} سند، ${financialDrafts.toLocaleString("fa-IR")} درآمد یا هزینه، ${invoiceDrafts.toLocaleString("fa-IR")} فاکتور و ${paymentDrafts.toLocaleString("fa-IR")} دریافت یا پرداخت پیش‌نویس دارد؛ ابتدا وضعیت آن‌ها را تعیین کنید.` } as const;
       await tx.fiscalYear.update({ where: { id }, data: { status: "CLOSED" } });
       await tx.fiscalYearEvent.create({ data: { organizationId: member.organizationId, fiscalYearId: id, actorId: session.user.id, actorName: session.user.name, type: "CLOSED", details: { previousStatus: "OPEN", status: "CLOSED" } } });
       return { status: 200 } as const;

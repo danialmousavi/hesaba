@@ -70,6 +70,17 @@ enum FinancialPaymentMethod {
 
 enum InvoiceStatus {
   DRAFT
+  ISSUED
+}
+
+enum PaymentType {
+  RECEIPT
+  PAYMENT
+}
+
+enum PaymentStatus {
+  DRAFT
+  POSTED
 }
 
 model User {
@@ -102,6 +113,7 @@ model Organization {
   partyAccountEvents PartyAccountEvent[]
   financialTransactions FinancialTransaction[]
   invoices Invoice[]
+  payments Payment[]
 }
 
 model Product {
@@ -142,6 +154,7 @@ model Party {
   accountLinks   PartyAccount[]
   accountEvents  PartyAccountEvent[]
   invoices       Invoice[]
+  payments       Payment[]
 
   @@unique([organizationId, id])
   @@index([organizationId, name])
@@ -212,6 +225,7 @@ model LedgerAccount {
   partyLinks     PartyAccount[]
   financialCategories FinancialTransaction[] @relation("FinancialCategory")
   financialSettlements FinancialTransaction[] @relation("FinancialSettlement")
+  payments Payment[]
 
   @@unique([organizationId, code])
   @@unique([organizationId, id])
@@ -246,6 +260,7 @@ model FiscalYear {
   journalEntries JournalEntry[]
   financialTransactions FinancialTransaction[]
   invoices Invoice[]
+  payments Payment[]
 
   @@unique([organizationId, name])
   @@unique([organizationId, id])
@@ -268,6 +283,8 @@ model JournalEntry {
   lines          JournalLine[]
   events         JournalEvent[]
   financialTransaction FinancialTransaction?
+  invoice Invoice?
+  payment Payment?
 
   @@unique([organizationId, fiscalYearId, number])
   @@unique([organizationId, id])
@@ -327,14 +344,21 @@ model Invoice {
   status           InvoiceStatus @default(DRAFT)
   description      String?
   revision         Int           @default(0)
+  number           Int?
+  journalEntryId   String?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   fiscalYear       FiscalYear    @relation(fields: [organizationId, fiscalYearId], references: [organizationId, id], onDelete: Restrict)
   customer         Party         @relation(fields: [organizationId, customerId], references: [organizationId, id], onDelete: Restrict)
+  journalEntry     JournalEntry? @relation(fields: [organizationId, fiscalYearId, journalEntryId], references: [organizationId, fiscalYearId, id], onDelete: Restrict, map: "Invoice_org_year_entry_fkey")
   lines            InvoiceLine[]
+  allocations      PaymentAllocation[]
 
   @@unique([organizationId, id])
+  @@unique([organizationId, customerId, id], map: "Invoice_org_customer_id_key")
+  @@unique([organizationId, fiscalYearId, number])
+  @@unique([organizationId, fiscalYearId, journalEntryId], map: "Invoice_org_year_entry_key")
   @@index([organizationId, fiscalYearId, date])
   @@index([organizationId, customerId, status])
 }
@@ -358,6 +382,53 @@ model InvoiceLine {
 
   @@unique([organizationId, invoiceId, position])
   @@index([organizationId, productId])
+}
+
+model Payment {
+  id                  String             @id @default(cuid())
+  organizationId      String
+  fiscalYearId        String
+  partyId             String
+  type                PaymentType
+  status              PaymentStatus      @default(DRAFT)
+  date                DateTime           @db.Date
+  amount              Decimal            @db.Decimal(20, 0)
+  method              FinancialPaymentMethod
+  settlementAccountId String
+  description         String?
+  requestKey          String?
+  requestHash         String?
+  journalEntryId      String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  organization        Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fiscalYear          FiscalYear         @relation(fields: [organizationId, fiscalYearId], references: [organizationId, id], onDelete: Restrict)
+  party               Party              @relation(fields: [organizationId, partyId], references: [organizationId, id], onDelete: Restrict)
+  settlementAccount   LedgerAccount      @relation(fields: [organizationId, settlementAccountId], references: [organizationId, id], onDelete: Restrict)
+  journalEntry        JournalEntry?      @relation(fields: [organizationId, fiscalYearId, journalEntryId], references: [organizationId, fiscalYearId, id], onDelete: Restrict, map: "Payment_org_year_entry_fkey")
+  allocations         PaymentAllocation[]
+
+  @@unique([organizationId, partyId, id, type], map: "Payment_org_party_id_type_key")
+  @@unique([organizationId, requestKey], map: "Payment_org_request_key")
+  @@unique([organizationId, fiscalYearId, journalEntryId], map: "Payment_org_year_entry_key")
+  @@index([organizationId, fiscalYearId, date])
+  @@index([organizationId, partyId, type])
+}
+
+model PaymentAllocation {
+  id             String      @id @default(cuid())
+  organizationId String
+  partyId        String
+  paymentId      String
+  paymentType    PaymentType @default(RECEIPT)
+  invoiceId      String
+  amount         Decimal     @db.Decimal(20, 0)
+  createdAt      DateTime    @default(now())
+  payment        Payment     @relation(fields: [organizationId, partyId, paymentId, paymentType], references: [organizationId, partyId, id, type], onDelete: Cascade, onUpdate: Restrict, map: "PaymentAllocation_payment_fkey")
+  invoice        Invoice     @relation(fields: [organizationId, partyId, invoiceId], references: [organizationId, customerId, id], onDelete: Restrict, onUpdate: Restrict, map: "PaymentAllocation_invoice_fkey")
+
+  @@unique([organizationId, paymentId, invoiceId], map: "PaymentAllocation_org_payment_invoice_key")
+  @@index([organizationId, invoiceId])
 }
 
 model Membership {
