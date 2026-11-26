@@ -16,13 +16,13 @@ export default async function DashboardPage() {
   });
   if (!membership) redirect("/onboarding");
   const [years, cashAccounts] = await Promise.all([
-    prisma.fiscalYear.findMany({ where: { organizationId: membership.organizationId }, orderBy: { startDate: "desc" }, select: { id: true, name: true, status: true } }),
+    prisma.fiscalYear.findMany({ where: { organizationId: membership.organizationId }, orderBy: { startDate: "desc" }, select: { id: true, name: true, status: true, startDate: true, endDate: true } }),
     prisma.ledgerAccount.findMany({ where: { organizationId: membership.organizationId, type: "ASSET", children: { none: {} }, partyLinks: { none: {} } }, orderBy: [{ code: "asc" }, { id: "asc" }], select: { id: true, code: true, name: true, isActive: true } }),
   ]);
   return <section className="w-full">
     <p className="text-sm font-semibold text-emerald-700">نمای کلی · {membership.organization.name}</p>
     <h1 className="mt-3 font-modam text-3xl font-bold text-slate-900">خوش آمدید، {session.user.name}</h1>
     <p className="mt-3 text-sm leading-7 text-slate-600">وضعیت مالی و آخرین فعالیت‌های سازمان را در یک نگاه ببینید.</p>
-    {years.length === 0 ? <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 text-sm leading-7 text-slate-600">برای مشاهده خلاصه مالی، ابتدا سال مالی ایجاد کنید. <Link href="/dashboard/fiscal-years" className="font-semibold text-emerald-700 underline underline-offset-4">مدیریت سال مالی</Link></div> : <DashboardSummary years={years} cashAccounts={cashAccounts} />}
+    {years.length === 0 ? <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 text-sm leading-7 text-slate-600">برای مشاهده خلاصه مالی، ابتدا سال مالی ایجاد کنید. <Link href="/dashboard/fiscal-years" className="font-semibold text-emerald-700 underline underline-offset-4">مدیریت سال مالی</Link></div> : <DashboardSummary years={years.map((year) => ({ ...year, startDate: year.startDate.toISOString().slice(0, 10), endDate: year.endDate.toISOString().slice(0, 10) }))} cashAccounts={cashAccounts} />}
   </section>;
 }

@@ -302,7 +302,7 @@ try {
   assert.ok((await viewerSupplierPage.text()).includes("نقش مشاهده‌گر اجازه ثبت پرداخت ندارد"));
   if (process.env.RECEIPT_UI_BROWSER) {
     const { testReceiptBrowser } = await import("./receipt-ui-browser.mjs");
-    await testReceiptBrowser({ chromePath: process.env.RECEIPT_UI_BROWSER, base, cookie: owner.cookie, ownerId: owner.id, organizationId: org, customerId: customer, supplierId: supplier, cashId: cash, fiscalYearId: year, printInvoiceId: draft.id });
+    await testReceiptBrowser({ chromePath: process.env.RECEIPT_UI_BROWSER, base, cookie: owner.cookie, ownerId: owner.id, organizationId: org, customerId: customer, supplierId: supplier, cashId: cash, revenueId: revenue, fiscalYearId: year, printInvoiceId: draft.id });
   }
   const supplierPayment = { requestKey: randomUUID(), fiscalYearId: year, partyId: supplier, date: "2026-05-15", amount: "500", method: "BANK_TRANSFER", settlementAccountId: cash, description: "Supplier payment" };
   const pay = (user, body, origin = base) => fetch(`${base}/api/supplier-payments`, { method: "POST", headers: { ...headers(user), origin }, body: JSON.stringify(body) });
@@ -594,6 +594,9 @@ try {
   const commitClose = (user, body) => fetch(`${base}/api/fiscal-years/${closeYear}/closing`, { method: "POST", headers: headers(user), body: JSON.stringify(body) });
   const profitUrl = `${base}/api/reports/profit-loss?fiscalYearId=${closeYear}`;
   const profitBefore = await (await fetch(profitUrl, { headers: headers(closingUser) })).json();
+  assert.equal((await fetch(`${base}/api/journal-entries/${closeSource}`, { headers: headers(owner) })).status, 404);
+  assert.equal((await fetch(`${base}/api/journal-entries?fiscalYearId=${closeYear}`, { headers: headers(owner) })).status, 404);
+  assert.equal((await fetch(`${base}/api/journal-entries/${closeSource}`, { headers: headers(closingUser) })).status, 200);
   const summaryUrl = `${base}/api/dashboard/summary?fiscalYearId=${closeYear}`;
   const monthlyUrl = `${base}/api/dashboard/monthly?fiscalYearId=${closeYear}`;
   const summaryBefore = await (await fetch(summaryUrl, { headers: headers(closingUser) })).json();

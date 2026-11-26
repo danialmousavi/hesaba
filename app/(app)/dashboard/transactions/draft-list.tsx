@@ -2,7 +2,8 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import type { Draft, Year } from "./types";
+import type { Account, Draft, Year } from "./types";
+import { TransactionForm } from "./transaction-form";
 
 type Filters = { fiscalYearId: string; type: string; search: string; page: number };
 type Result = { transactions: Draft[]; total: number; page: number; pageSize: number };
@@ -10,7 +11,7 @@ const field = "mt-2 block w-full rounded-lg border border-slate-300 bg-white px-
 const dateFormat = new Intl.DateTimeFormat("fa-IR", { dateStyle: "medium", timeZone: "UTC" });
 const methodLabels = { CASH: "نقدی", BANK_TRANSFER: "انتقال بانکی", OTHER: "سایر" } as const;
 
-export function DraftList({ years, canWrite, revision, onChanged }: { years: Year[]; canWrite: boolean; revision: number; onChanged: () => void }) {
+export function DraftList({ years, accounts, canWrite, revision, onChanged }: { years: Year[]; accounts: Account[]; canWrite: boolean; revision: number; onChanged: () => void }) {
   const [filters, setFilters] = useState<Filters>({ fiscalYearId: "", type: "all", search: "", page: 1 });
   const [year, setYear] = useState("");
   const [type, setType] = useState("all");
@@ -19,6 +20,7 @@ export function DraftList({ years, canWrite, revision, onChanged }: { years: Yea
   const [result, setResult] = useState<{ key: string; data?: Result; error?: string } | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState("");
   const [success, setSuccess] = useState("");
@@ -45,7 +47,7 @@ export function DraftList({ years, canWrite, revision, onChanged }: { years: Yea
   }, [query, key]);
 
   function filter(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setActionError(""); setSuccess(""); setJournalNumber(null); setConfirmId(null); setPreviewId(null);
+    event.preventDefault(); setActionError(""); setSuccess(""); setJournalNumber(null); setConfirmId(null); setPreviewId(null); setEditId(null);
     setFilters({ fiscalYearId: year, type, search: search.trim(), page: 1 });
   }
   async function remove(id: string) {
@@ -93,7 +95,8 @@ export function DraftList({ years, canWrite, revision, onChanged }: { years: Yea
         <p className="mt-4 break-words text-lg font-bold text-slate-900">{BigInt(item.amount).toLocaleString("fa-IR")} ریال</p>
         <dl className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-2"><div><dt className="text-slate-500">حساب {item.type === "INCOME" ? "درآمد" : "هزینه"}</dt><dd className="mt-1 break-words"><bdi>{item.categoryAccount.code}</bdi> — {item.categoryAccount.name}</dd></div><div><dt className="text-slate-500">حساب تسویه</dt><dd className="mt-1 break-words"><bdi>{item.settlementAccount.code}</bdi> — {item.settlementAccount.name}</dd></div><div><dt className="text-slate-500">روش دریافت یا پرداخت</dt><dd className="mt-1">{methodLabels[item.paymentMethod]}</dd></div></dl>
         {canWrite && item.fiscalYear.status === "OPEN" && <div className="mt-4 border-t border-slate-100 pt-3">
-          {confirmId !== item.id && previewId !== item.id && <div className="flex flex-wrap gap-2"><button type="button" disabled={pending} onClick={() => { setPreviewId(item.id); setConfirmId(null); setActionError(""); setSuccess(""); setJournalNumber(null); }} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">پیش‌نمایش و ثبت نهایی</button><button type="button" disabled={pending} onClick={() => { setConfirmId(item.id); setPreviewId(null); setActionError(""); setSuccess(""); setJournalNumber(null); }} className="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">حذف پیش‌نویس</button></div>}
+          {confirmId !== item.id && previewId !== item.id && editId !== item.id && <div className="flex flex-wrap gap-2"><button type="button" disabled={pending} onClick={() => { setEditId(item.id); setConfirmId(null); setPreviewId(null); setActionError(""); setSuccess(""); }} className="rounded-lg border border-emerald-700 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50">ویرایش پیش‌نویس</button><button type="button" disabled={pending} onClick={() => { setPreviewId(item.id); setEditId(null); setConfirmId(null); setActionError(""); setSuccess(""); setJournalNumber(null); }} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">پیش‌نمایش و ثبت نهایی</button><button type="button" disabled={pending} onClick={() => { setConfirmId(item.id); setEditId(null); setPreviewId(null); setActionError(""); setSuccess(""); setJournalNumber(null); }} className="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">حذف پیش‌نویس</button></div>}
+          {editId === item.id && years.find((year) => year.id === item.fiscalYearId) && <section aria-label={`ویرایش پیش‌نویس ${item.description}`} className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4"><h4 className="font-semibold text-emerald-950">ویرایش پیش‌نویس</h4><TransactionForm key={item.id} year={years.find((year) => year.id === item.fiscalYearId)!} accounts={accounts} initial={item} onCancel={() => setEditId(null)} onCreated={() => { setEditId(null); setSuccess("تغییرات پیش‌نویس ذخیره شد. فهرست با فیلترهای فعلی به‌روزرسانی می‌شود."); onChanged(); }} /></section>}
           {previewId === item.id && <section aria-label={`پیش‌نمایش سند ${item.description}`} className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4"><h4 className="font-semibold text-emerald-950">پیش‌نمایش سند حسابداری</h4><p className="mt-1 text-xs leading-6 text-slate-600">پس از تأیید، سند نهایی ایجاد می‌شود و این پیش‌نویس از فهرست خارج خواهد شد.</p><dl className="mt-3 space-y-3 text-sm"><div><dt className="font-semibold text-slate-700">بدهکار</dt><dd className="mt-1 break-words">{item.type === "INCOME" ? <><bdi>{item.settlementAccount.code}</bdi> — {item.settlementAccount.name}</> : <><bdi>{item.categoryAccount.code}</bdi> — {item.categoryAccount.name}</>} · {BigInt(item.amount).toLocaleString("fa-IR")} ریال</dd></div><div><dt className="font-semibold text-slate-700">بستانکار</dt><dd className="mt-1 break-words">{item.type === "INCOME" ? <><bdi>{item.categoryAccount.code}</bdi> — {item.categoryAccount.name}</> : <><bdi>{item.settlementAccount.code}</bdi> — {item.settlementAccount.name}</>} · {BigInt(item.amount).toLocaleString("fa-IR")} ریال</dd></div></dl><div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={pending} onClick={() => void post(item.id)} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">{pending ? "در حال ثبت…" : "تأیید و ثبت نهایی"}</button><button type="button" disabled={pending} onClick={() => { setPreviewId(null); setActionError(""); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50">انصراف</button></div></section>}
           {confirmId === item.id && <div className="rounded-lg bg-red-50 p-3"><p className="text-sm leading-6 text-red-900">این پیش‌نویس حذف شود؟</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={pending} onClick={() => void remove(item.id)} className="rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{pending ? "در حال حذف…" : "تأیید حذف"}</button><button type="button" disabled={pending} onClick={() => setConfirmId(null)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50">انصراف</button></div></div>}
         </div>}

@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { DashboardRange } from "./dashboard-date-filter";
 
 type Month = { year: number; month: number; revenue: string; expenses: string };
 const names = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
 const absolute = (value: bigint) => value < 0n ? -value : value;
 
-export function MonthlyChart({ yearId }: { yearId: string }) {
+export function MonthlyChart({ yearId, range }: { yearId: string; range: DashboardRange | null }) {
   const [months, setMonths] = useState<Month[] | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
@@ -15,7 +16,8 @@ export function MonthlyChart({ yearId }: { yearId: string }) {
     const controller = new AbortController();
     async function load() {
       try {
-        const response = await fetch(`/api/dashboard/monthly?fiscalYearId=${encodeURIComponent(yearId)}`, { cache: "no-store", signal: controller.signal });
+        const params = new URLSearchParams({ fiscalYearId: yearId, ...(range ?? {}) });
+        const response = await fetch(`/api/dashboard/monthly?${params}`, { cache: "no-store", signal: controller.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "دریافت اطلاعات نمودار انجام نشد.");
         if (!controller.signal.aborted) setMonths(data.months);
@@ -25,7 +27,7 @@ export function MonthlyChart({ yearId }: { yearId: string }) {
     }
     void load();
     return () => controller.abort();
-  }, [yearId, attempt]);
+  }, [yearId, range, attempt]);
 
   const max = (months ?? []).reduce((largest, item) => {
     const revenue = absolute(BigInt(item.revenue));
@@ -38,7 +40,7 @@ export function MonthlyChart({ yearId }: { yearId: string }) {
       <div><h2 id="monthly-chart-title" className="font-modam text-lg font-bold text-slate-900">درآمد و هزینه ماهانه</h2><p className="mt-1 text-xs leading-6 text-slate-500">خالص گردش اسناد نهایی، به تفکیک ماه شمسی و به ریال</p></div>
       <div className="flex gap-4 text-xs text-slate-600"><span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-emerald-600" />درآمد</span><span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-amber-500" />هزینه</span></div>
     </div>
-    {error ? <p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-700">{error} <button type="button" onClick={() => { setError(""); setAttempt((value) => value + 1); }} className="font-semibold underline underline-offset-4">تلاش دوباره</button></p> : months === null ? <p role="status" className="mt-5 text-sm text-slate-500">در حال دریافت اطلاعات نمودار…</p> : months.length === 0 ? <p className="mt-5 rounded-xl bg-slate-50 p-5 text-sm text-slate-600">برای این سال مالی گردش درآمد یا هزینه‌ای ثبت نشده است.</p> : <>
+    {error ? <p role="alert" className="mt-5 rounded-xl bg-red-50 p-4 text-sm text-red-700">{error} <button type="button" onClick={() => { setError(""); setAttempt((value) => value + 1); }} className="font-semibold underline underline-offset-4">تلاش دوباره</button></p> : months === null ? <p role="status" className="mt-5 text-sm text-slate-500">در حال دریافت اطلاعات نمودار…</p> : months.length === 0 ? <p className="mt-5 rounded-xl bg-slate-50 p-5 text-sm text-slate-600">در بازه اعمال‌شده گردش درآمد یا هزینه‌ای ثبت نشده است.</p> : <>
       <p className="mt-4 text-xs leading-6 text-slate-500">فقط ماه‌های دارای گردش نمایش داده شده‌اند. میله‌های سمت چپ صفر نشان‌دهنده مبلغ منفی هستند.</p>
       <div className="mt-4 space-y-5" role="list" aria-label="مقایسه درآمد و هزینه ماهانه">
         {months.map((item) => <div key={`${item.year}-${item.month}`} role="listitem" className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">

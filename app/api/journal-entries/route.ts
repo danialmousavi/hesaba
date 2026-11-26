@@ -28,8 +28,32 @@ async function member(request: Request) {
 export async function GET(request: Request) {
   const membership = await member(request);
   if (!membership) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
-  const entries = await prisma.journalEntry.findMany({ where: { organizationId: membership.organizationId }, orderBy: [{ date: "desc" }, { number: "desc" }], select: { id: true, kind: true, fiscalYearId: true, number: true, date: true, description: true, status: true, reversal: { select: { reversalEntryId: true } }, reversalOf: { select: { sourceEntryId: true } }, invoice: { select: { id: true } }, payment: { select: { id: true } }, financialTransaction: { select: { id: true } }, lines: { select: { id: true, accountId: true, description: true, debit: true, credit: true } } } });
-  return Response.json({ entries }, { headers: { "Cache-Control": "no-store" } });
+  const params = new URL(request.url).searchParams;
+  const allowed = ["fiscalYearId", "status", "from", "to", "q", "page", "pageSize"];
+  if ([...params.keys()].some((key) => !allowed.includes(key) || params.getAll(key).length !== 1)) return Response.json({ error: "پارامترهای جست‌وجوی سند معتبر نیستند." }, { status: 400 });
+  const positiveInteger = z.string().regex(/^[1-9]\d*$/).transform(Number).pipe(z.number().int().max(1000000));
+  const parsed = z.object({ fiscalYearId: z.string().cuid().optional(), status: z.enum(["DRAFT", "POSTED"]).optional(), from: z.iso.date().optional(), to: z.iso.date().optional(), q: z.string().trim().min(1).max(100).optional(), page: positiveInteger.optional(), pageSize: positiveInteger.pipe(z.number().max(100)).optional() }).safeParse(Object.fromEntries(params));
+  if (!parsed.success || (parsed.data.from && parsed.data.to && parsed.data.from > parsed.data.to)) return Response.json({ error: "پارامترهای جست‌وجوی سند معتبر نیستند." }, { status: 400 });
+  const { fiscalYearId, status, from, to, q } = parsed.data;
+  const page = parsed.data.page ?? 1, pageSize = parsed.data.pageSize ?? 25;
+  if ((page - 1) * pageSize > 1000000) return Response.json({ error: "شماره صفحه معتبر نیست." }, { status: 400 });
+  const numericQuery = q && /^[1-9]\d*$/.test(q) && Number(q) <= 2147483647 ? Number(q) : null;
+  const where: Prisma.JournalEntryWhereInput = { organizationId: membership.organizationId, ...(fiscalYearId && { fiscalYearId }), ...(status && { status }), ...(from || to ? { date: { ...(from && { gte: new Date(`${from}T00:00:00Z`) }), ...(to && { lte: new Date(`${to}T00:00:00Z`) }) } } : {}), ...(q && { OR: [{ description: { contains: q, mode: "insensitive" } }, ...(numericQuery ? [{ number: numericQuery }] : [])] }) };
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      if (fiscalYearId && !await tx.fiscalYear.findFirst({ where: { id: fiscalYearId, organizationId: membership.organizationId }, select: { id: true } })) return null;
+      const [entries, total] = await Promise.all([
+        tx.journalEntry.findMany({ where, orderBy: [{ date: "desc" }, { number: "desc" }, { id: "desc" }], ...(parsed.data.page !== undefined || parsed.data.pageSize !== undefined ? { skip: (page - 1) * pageSize, take: pageSize } : {}), select: { id: true, kind: true, fiscalYearId: true, number: true, date: true, description: true, status: true, reversal: { select: { reversalEntryId: true } }, reversalOf: { select: { sourceEntryId: true } }, invoice: { select: { id: true } }, payment: { select: { id: true } }, financialTransaction: { select: { id: true } }, lines: { select: { id: true, accountId: true, description: true, debit: true, credit: true } } } }),
+        tx.journalEntry.count({ where }),
+      ]);
+      return { entries, total, ...(parsed.data.page !== undefined || parsed.data.pageSize !== undefined ? { page, pageSize } : {}) };
+    }, { isolationLevel: "RepeatableRead" });
+    if (!result) return Response.json({ error: "سال مالی پیدا نشد." }, { status: 404 });
+    return Response.json(result, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("Journal list failed", error);
+    return Response.json({ error: "دریافت فهرست اسناد انجام نشد." }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {

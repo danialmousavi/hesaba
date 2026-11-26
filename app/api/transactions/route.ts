@@ -4,17 +4,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { lockFinancialAccounts } from "@/lib/financial-accounts";
 import { isTransactionConflict } from "@/lib/prisma-errors";
-
-const inputSchema = z.strictObject({
-  fiscalYearId: z.string().cuid(),
-  type: z.enum(["INCOME", "EXPENSE"]),
-  date: z.iso.date(),
-  amount: z.string().regex(/^[1-9]\d{0,19}$/, "مبلغ باید عدد صحیح مثبت و حداکثر ۲۰ رقم به ریال باشد."),
-  description: z.string().trim().min(1, "شرح را وارد کنید.").max(500),
-  paymentMethod: z.enum(["CASH", "BANK_TRANSFER", "OTHER"]),
-  categoryAccountId: z.string().cuid(),
-  settlementAccountId: z.string().cuid(),
-}).refine((value) => value.categoryAccountId !== value.settlementAccountId, { message: "حساب درآمد یا هزینه و حساب تسویه باید متفاوت باشند." });
+import { financialTransactionInput } from "@/lib/financial-transaction-input";
 
 const querySchema = z.object({
   fiscalYearId: z.string().cuid().optional(),
@@ -61,7 +51,7 @@ export async function POST(request: Request) {
   const member = await membership(request);
   if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
   if (member.role === "VIEWER") return Response.json({ error: "نقش مشاهده‌گر اجازه ثبت پیش‌نویس ندارد." }, { status: 403 });
-  const parsed = inputSchema.safeParse(await request.json().catch(() => null));
+  const parsed = financialTransactionInput.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues[0]?.message ?? "اطلاعات معتبر نیست." }, { status: 400 });
   const date = new Date(`${parsed.data.date}T00:00:00.000Z`);
   if (Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== parsed.data.date) return Response.json({ error: "تاریخ معتبر نیست." }, { status: 400 });

@@ -13,6 +13,24 @@ const schema = z.object({
   lines: z.array(z.object({ accountId: z.string().cuid(), description: z.string().trim().max(500).optional(), debit: amount, credit: amount }).strict().refine((line) => (line.debit === "0") !== (line.credit === "0"))).min(1).max(100),
 }).strict();
 
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
+  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true } });
+  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 403 });
+  const { id } = await params;
+  if (!z.string().cuid().safeParse(id).success) return Response.json({ error: "شناسه سند معتبر نیست." }, { status: 400 });
+  try {
+    const entry = await prisma.journalEntry.findFirst({ where: { id, organizationId: member.organizationId }, select: { id: true, number: true, date: true, description: true, status: true, kind: true, createdAt: true, updatedAt: true, fiscalYear: { select: { id: true, name: true, status: true } }, lines: { orderBy: { id: "asc" }, select: { id: true, description: true, debit: true, credit: true, account: { select: { id: true, code: true, name: true, type: true } } } }, reversal: { select: { reversalEntryId: true } }, reversalOf: { select: { sourceEntryId: true } }, invoice: { select: { id: true, number: true } }, payment: { select: { id: true } }, financialTransaction: { select: { id: true } } } });
+    if (!entry) return Response.json({ error: "سند پیدا نشد." }, { status: 404 });
+    const totals = entry.lines.reduce((sum, line) => ({ debit: sum.debit + BigInt(line.debit.toFixed(0)), credit: sum.credit + BigInt(line.credit.toFixed(0)) }), { debit: 0n, credit: 0n });
+    return Response.json({ entry, totals: { debit: totals.debit.toString(), credit: totals.credit.toString() } }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("Journal detail failed", error);
+    return Response.json({ error: "دریافت جزئیات سند انجام نشد." }, { status: 500 });
+  }
+}
+
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
   const session = await auth.api.getSession({ headers: request.headers });

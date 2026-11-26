@@ -272,6 +272,58 @@ try {
     { year: 1405, month: 1, revenue: "0", expenses: "20" },
     { year: 1405, month: 3, revenue: "100", expenses: "40" },
   ]);
+  // The Persian new-year boundary lies between these two Gregorian accounting dates.
+  const boundary = "&from=2026-03-20&to=2026-03-21";
+  const rangedSummary = await (await fetch(summaryUrl + boundary, { headers })).json();
+  assert.deepEqual(rangedSummary.range, { from: "2026-03-20", to: "2026-03-21" });
+  assert.deepEqual([rangedSummary.revenue, rangedSummary.expenses, rangedSummary.profit], ["30", "20", "10"]);
+  assert.equal(rangedSummary.postedCount, 2);
+  assert.equal(rangedSummary.draftCount, 0);
+  assert.equal(rangedSummary.recentPosted.length, 2);
+  const rangedMonthly = await (await fetch(monthlyUrl + boundary, { headers })).json();
+  assert.deepEqual(rangedMonthly.months, [
+    { year: 1404, month: 12, revenue: "30", expenses: "0" },
+    { year: 1405, month: 1, revenue: "0", expenses: "20" },
+  ]);
+  const oneDay = "&from=2026-03-21&to=2026-03-21";
+  const daySummary = await (await fetch(summaryUrl + oneDay, { headers })).json();
+  assert.deepEqual([daySummary.revenue, daySummary.expenses, daySummary.postedCount], ["0", "20", 1]);
+  assert.equal((await (await fetch(monthlyUrl + oneDay, { headers })).json()).months.length, 1);
+  const journalUrl = `${base}/api/journal-entries`;
+  assert.equal((await fetch(journalUrl)).status, 401);
+  assert.equal((await fetch(`${journalUrl}/${pnlId}`)).status, 401);
+  const detailResponse = await fetch(`${journalUrl}/${pnlId}`, { headers });
+  assert.equal(detailResponse.status, 200);
+  const detail = await detailResponse.json();
+  assert.equal(detail.entry.fiscalYear.id, year);
+  assert.equal(detail.entry.lines.length, 3);
+  assert.ok(detail.entry.lines.some((line) => line.account.id === revenueAccount && line.account.code === "400"));
+  assert.deepEqual(detail.totals, { debit: "100", credit: "100" });
+  const largeDetail = await (await fetch(`${journalUrl}/${id}`, { headers })).json();
+  assert.deepEqual(largeDetail.totals, { debit: amount, credit: amount });
+  assert.equal((await fetch(`${journalUrl}/invalid`, { headers })).status, 400);
+  assert.equal((await fetch(`${journalUrl}/c${token}missing`, { headers })).status, 404);
+  const filtered = await (await fetch(`${journalUrl}?fiscalYearId=${year}&status=POSTED&from=2026-03-20&to=2026-03-21&page=1&pageSize=1`, { headers })).json();
+  assert.equal(filtered.total, 2);
+  assert.equal(filtered.entries.length, 1);
+  assert.equal(filtered.entries[0].number, 6);
+  const nextPage = await (await fetch(`${journalUrl}?fiscalYearId=${year}&status=POSTED&from=2026-03-20&to=2026-03-21&page=2&pageSize=1`, { headers })).json();
+  assert.equal(nextPage.entries[0].number, 5);
+  assert.equal((await (await fetch(`${journalUrl}?q=4`, { headers })).json()).entries.some((entry) => entry.id === pnlId), true);
+  assert.ok((await (await fetch(`${journalUrl}?q=test`, { headers })).json()).entries.some((entry) => entry.id === pnlId));
+  assert.ok((await (await fetch(`${journalUrl}?status=DRAFT`, { headers })).json()).entries.every((entry) => entry.status === "DRAFT"));
+  assert.equal((await fetch(`${journalUrl}?fiscalYearId=c${token}missing`, { headers })).status, 404);
+  for (const query of ["status=INVALID", "from=2026-02-30", "from=2026-03-21&to=2026-03-20", "page=0", "pageSize=101", "q=", "status=POSTED&status=DRAFT", "unexpected=1"]) {
+    assert.equal((await fetch(`${journalUrl}?${query}`, { headers })).status, 400, query);
+  }
+  for (const url of [summaryUrl, monthlyUrl]) {
+    for (const query of ["&from=2026-03-20", "&from=2026-02-30&to=2026-03-21", "&from=2026-03-21&to=2026-03-20", "&from=2025-12-31&to=2026-03-21", "&from=2026-03-20&to=2027-01-01", "&from=2026-03-20&from=2026-03-21&to=2026-03-21", "&unexpected=1"]) {
+      assert.equal((await fetch(url + query, { headers })).status, 400, `${url}${query}`);
+    }
+    const empty = await (await fetch(`${url}&from=2026-01-01&to=2026-01-01`, { headers })).json();
+    assert.deepEqual(empty.range, { from: "2026-01-01", to: "2026-01-01" });
+    assert.ok(empty.months ? empty.months.length === 0 : empty.postedCount === 0);
+  }
   assert.equal((await fetch(`${base}/api/reports/profit-loss?fiscalYearId=c${token}x`, { headers })).status, 404);
   const protectedParty = `c${token}linkparty`, protectedAccount = `c${token}linkpayable`;
   const patchJson = (url, data) => fetch(url, { method: "PATCH", headers, body: JSON.stringify(data) });
@@ -392,6 +444,9 @@ try {
     const createFinancial = (payload, customHeaders = headers) => fetch(financialUrl, { method: "POST", headers: customHeaders, body: JSON.stringify(payload) });
     const deleteFinancial = (recordId, customHeaders = headers) => fetch(`${financialUrl}/${recordId}`, { method: "DELETE", headers: customHeaders });
     const postFinancial = (recordId, customHeaders = headers) => fetch(`${financialUrl}/${recordId}/post`, { method: "POST", headers: customHeaders });
+    const editFinancial = (recordId, payload, customHeaders = headers) => fetch(`${financialUrl}/${recordId}`, { method: "PATCH", headers: customHeaders, body: JSON.stringify(payload) });
+    const { fiscalYearId: ignoredFiscalYear, ...editInput } = transactionInput;
+    assert.equal(ignoredFiscalYear, year);
     const foreignOrg = `c${token}foreign`, foreignYear = `c${token}foreignyear`, foreignCategory = `c${token}foreigncategory`, foreignDraft = `c${token}foreigndraft`;
     await transactionDb.query('INSERT INTO "FiscalYear" (id,"organizationId",name,"startDate","endDate","updatedAt") VALUES ($1,$2,$3,$4,$5,now())', [foreignYear, foreignOrg, "Foreign year", "2026-01-01", "2026-12-31"]);
     await transactionDb.query('INSERT INTO "LedgerAccount" (id,"organizationId",code,name,type,"updatedAt") VALUES ($1,$2,$3,$3,$4,now())', [foreignCategory, foreignOrg, "foreign-income", "REVENUE"]);
@@ -418,6 +473,24 @@ try {
     const expenseDraft = await createFinancial({ ...transactionInput, type: "EXPENSE", amount: "25", categoryAccountId: expenseAccount, paymentMethod: "BANK_TRANSFER", description: "API expense draft" });
     assert.equal(expenseDraft.status, 201, await expenseDraft.clone().text());
     const expenseId = (await expenseDraft.json()).transaction.id;
+    const expenseEdit = { ...editInput, type: "EXPENSE", amount: "42", date: "2026-03-21", description: "Updated expense", paymentMethod: "OTHER", categoryAccountId: expenseAccount };
+    const editedExpense = await editFinancial(expenseId, expenseEdit);
+    assert.equal(editedExpense.status, 200, await editedExpense.clone().text());
+    const changed = (await editedExpense.json()).transaction;
+    assert.equal(changed.amount, "42"); assert.equal(changed.description, "Updated expense"); assert.equal(changed.fiscalYearId, year); assert.equal(changed.journalEntryId, null);
+    assert.equal((await transactionDb.query('SELECT count(*)::int AS count FROM "JournalEntry" WHERE "organizationId"=$1', [org])).rows[0].count, before.rows[0].count);
+    for (const bad of [{ ...expenseEdit, amount: "0" }, { ...expenseEdit, amount: "100000000000000000000" }, { ...expenseEdit, date: "2026-02-30" }, { ...expenseEdit, status: "POSTED" }, { ...expenseEdit, fiscalYearId: foreignYear }, { ...expenseEdit, settlementAccountId: expenseAccount }]) assert.equal((await editFinancial(expenseId, bad)).status, 400);
+    assert.equal((await editFinancial(expenseId, { ...expenseEdit, date: "2027-01-01" })).status, 400);
+    assert.equal((await editFinancial(expenseId, { ...expenseEdit, categoryAccountId: revenueAccount })).status, 400);
+    assert.equal((await editFinancial(expenseId, { ...expenseEdit, settlementAccountId: `c${token}linkaccount` })).status, 400);
+    assert.equal((await editFinancial(expenseId, { ...expenseEdit, settlementAccountId: `c${token}foreignacc` })).status, 400);
+    assert.equal((await editFinancial(foreignDraft, editInput)).status, 404);
+    assert.equal((await editFinancial("invalid", editInput)).status, 400);
+    assert.equal((await editFinancial(expenseId, expenseEdit, { "content-type": "application/json", origin: base })).status, 401);
+    assert.equal((await editFinancial(expenseId, expenseEdit, { ...headers, origin: "http://invalid.example" })).status, 403);
+    const closedDraft = `c${token}closedfinancial`;
+    await transactionDb.query('INSERT INTO "FinancialTransaction" (id,"organizationId","fiscalYearId",type,date,amount,description,"paymentMethod","categoryAccountId","settlementAccountId","updatedAt") VALUES ($1,$2,$3,\'INCOME\',\'2027-06-01\',1,\'Closed\',\'CASH\',$4,$5,now())', [closedDraft, org, `c${token}otheryear`, revenueAccount, debitAccount]);
+    assert.equal((await editFinancial(closedDraft, { ...editInput, date: "2027-06-01" })).status, 409);
     const listedDrafts = await fetch(`${financialUrl}?fiscalYearId=${year}&type=income&search=API&pageSize=1`, { headers });
     assert.equal(listedDrafts.status, 200); const listed = await listedDrafts.json(); assert.equal(listed.total, 1); assert.equal(listed.transactions[0].id, createdRecord.id);
     assert.equal((await fetch(`${financialUrl}?pageSize=101`, { headers })).status, 400);
@@ -434,6 +507,7 @@ try {
     assert.equal((await fetch(financialUrl, { headers })).status, 200);
     assert.equal((await createFinancial(transactionInput)).status, 403);
     assert.equal((await deleteFinancial(expenseId)).status, 403);
+    assert.equal((await editFinancial(expenseId, expenseEdit)).status, 403);
     assert.equal((await postFinancial(createdRecord.id)).status, 403);
     await transactionDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["ACCOUNTANT", user, org]);
     assert.equal((await deleteFinancial(expenseId)).status, 200);
@@ -444,12 +518,14 @@ try {
     const beforePnl = await (await fetch(pnlUrl, { headers })).json();
     await transactionDb.query('UPDATE "LedgerAccount" SET "isActive"=false WHERE "organizationId"=$1 AND id=$2', [org, revenueAccount]);
     assert.equal((await postFinancial(incomeId)).status, 409);
+    assert.equal((await editFinancial(incomeId, editInput)).status, 400);
     assert.equal((await transactionDb.query('SELECT status,"journalEntryId" FROM "FinancialTransaction" WHERE id=$1', [incomeId])).rows[0].status, "DRAFT");
     await transactionDb.query('UPDATE "LedgerAccount" SET "isActive"=true WHERE "organizationId"=$1 AND id=$2', [org, revenueAccount]);
     const parallelPost = await Promise.all([postFinancial(incomeId), postFinancial(incomeId)]);
     assert.equal(parallelPost.filter((response) => response.status === 200).length, 1);
     assert.equal(parallelPost.filter((response) => response.status === 409).length, 1);
     assert.equal((await postFinancial(incomeId)).status, 409);
+    assert.equal((await editFinancial(incomeId, editInput)).status, 409);
     const postedExpense = await postFinancial(expensePostId);
     assert.equal(postedExpense.status, 200, await postedExpense.clone().text());
     for (const [transactionId, debitId, creditId, expectedAmount] of [[incomeId, debitAccount, revenueAccount, "130"], [expensePostId, expenseAccount, debitAccount, "30"]]) {
@@ -466,6 +542,16 @@ try {
     assert.equal(BigInt(afterPnl.totals.profit) - BigInt(beforePnl.totals.profit), 100n);
     await transactionDb.query('UPDATE "Membership" SET role=$1 WHERE "userId"=$2 AND "organizationId"=$3', ["ADMIN", user, org]);
     assert.equal((await deleteFinancial(createdRecord.id)).status, 200);
+    const editRaceDraft = await createFinancial({ ...transactionInput, amount: "8", description: "Before race" });
+    assert.equal(editRaceDraft.status, 201);
+    const editRaceId = (await editRaceDraft.json()).transaction.id;
+    const [editRace, postRace] = await Promise.all([editFinancial(editRaceId, { ...editInput, amount: "9", description: "After race" }), postFinancial(editRaceId)]);
+    assert.ok([200, 409].includes(editRace.status)); assert.ok([200, 409].includes(postRace.status));
+    if (postRace.status !== 200) assert.equal((await postFinancial(editRaceId)).status, 200);
+    const raceState = await transactionDb.query('SELECT f.amount::text, f.description, e.description AS journal_description, (SELECT debit::text FROM "JournalLine" WHERE "entryId"=e.id AND "accountId"=$2) AS journal_amount FROM "FinancialTransaction" f JOIN "JournalEntry" e ON e.id=f."journalEntryId" WHERE f.id=$1', [editRaceId, debitAccount]);
+    assert.equal(raceState.rows[0].amount, editRace.status === 200 ? "9" : "8");
+    assert.equal(raceState.rows[0].journal_amount, raceState.rows[0].amount);
+    assert.equal(raceState.rows[0].journal_description, raceState.rows[0].description);
     const raceDraft = await createFinancial({ ...transactionInput, amount: "3", description: "Posting and deletion race" });
     assert.equal(raceDraft.status, 201);
     const raceId = (await raceDraft.json()).transaction.id;
