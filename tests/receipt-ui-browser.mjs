@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 // Optional interactive check: a fresh temporary Chrome profile and the isolated test database only.
-export async function testReceiptBrowser({ chromePath, base, cookie, ownerId, organizationId, customerId, supplierId, cashId, fiscalYearId }) {
+export async function testReceiptBrowser({ chromePath, base, cookie, ownerId, organizationId, customerId, supplierId, cashId, fiscalYearId, printInvoiceId }) {
   const root = await realpath(tmpdir());
   const profile = await mkdtemp(path.join(root, "hesaba-receipt-ui-"));
   const resolved = await realpath(profile);
@@ -96,6 +96,34 @@ export async function testReceiptBrowser({ chromePath, base, cookie, ownerId, or
     await evaluate(`(() => { const input = document.querySelector('input[placeholder="جست‌وجوی نام"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Customer'); input.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('form button[type="submit"], form button:not([type])').click(); })()`);
     await until(`!!document.body && document.body.innerText.includes('۲ شخص')`, "Party filter did not apply");
     assert.ok(await evaluate(`Array.from(document.querySelectorAll('h3')).some(x => x.innerText === 'Customer')`));
+    await call("Page.navigate", { url: `${base}/dashboard/reports/sales` });
+    await until(`!!document.body && document.body.innerText.includes('نتیجه گزارش') && document.body.innerText.includes('فاکتور شماره')`, "Sales report did not load");
+    assert.ok(await evaluate(`document.body.innerText.includes('جمع فروش') && document.body.innerText.includes('مانده دریافتنی') && document.body.innerText.includes('تاریخ حسابداری')`));
+    assert.ok(await evaluate(`document.documentElement.scrollWidth <= window.innerWidth + 1`), "Sales report should fit mobile width");
+    await evaluate(`(() => { const select = Array.from(document.querySelectorAll('select')).find(x => Array.from(x.options).some(o => o.value === 'partial')); select.value = 'partial'; select.dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('form button').click(); })()`);
+    await until(`document.body.innerText.includes('دریافت جزئی') && document.body.innerText.includes('فاکتور شماره')`, "Partial sales filter did not apply");
+    assert.ok(await evaluate(`document.querySelectorAll('input').length >= 3`), "Persian date filters should be present");
+    await call("Page.navigate", { url: `${base}/dashboard` });
+    await until(`!!document.querySelector('#sales-overview-title') && document.querySelector('#sales-overview-title').closest('section').innerText.includes('۱٬۴۲۰')`, "Dashboard sales did not load");
+    assert.ok(await evaluate(`(() => { const section = document.querySelector('#sales-overview-title').closest('section'); return section.innerText.includes('تعداد فاکتورها') && section.innerText.includes('۲') && section.innerText.includes('فروش ماهانه') && !!section.querySelector('a[href="/dashboard/reports/sales"]'); })()`));
+    assert.ok(await evaluate(`document.documentElement.scrollWidth <= window.innerWidth + 1`), "Dashboard should fit mobile width");
+    await until(`!!document.querySelector('#balance-overview-title') && document.querySelector('#balance-overview-title').closest('section').innerText.includes('حسابی انتخاب نشده')`, "Dashboard balances did not load");
+    assert.ok(await evaluate(`(() => { const el = document.querySelector('#balance-overview-title').closest('section'); return el.innerText.includes('مطالبات حساب‌های اشخاص') && el.innerText.includes('بدهی حساب‌های اشخاص') && el.innerText.includes('افتتاحیه'); })()`));
+    await evaluate(`document.querySelector('#balance-overview-title').closest('section').querySelector('summary').click()`);
+    await evaluate(`(() => { const section = document.querySelector('#balance-overview-title').closest('section'); section.querySelector('input[value="' + ${JSON.stringify(cashId)} + '"]').click(); Array.from(section.querySelectorAll('button')).find(x => x.innerText.includes('اعمال حساب‌های انتخاب‌شده')).click(); })()`);
+    await until(`(() => { const el = document.querySelector('#balance-overview-title').closest('section'); return el.innerText.includes('۱٬۳۲۰ ریال بدهکار') && !!el.querySelector('ul[aria-label="مانده حساب‌های نقدی انتخاب‌شده"]'); })()`, "Cash balance selection did not apply");
+    await call("Page.navigate", { url: `${base}/dashboard/invoices/${printInvoiceId}/print` });
+    await until(`!!document.body && document.body.innerText.includes('فاکتور فروش') && document.body.innerText.includes('۱٬۳۲۰')`, "Printable invoice did not load");
+    await call("Emulation.setEmulatedMedia", { media: "print" });
+    assert.ok(await evaluate(`getComputedStyle(document.querySelector('aside')).display === 'none' && Array.from(document.querySelectorAll('button')).filter(x => x.innerText === 'چاپ فاکتور').every(x => x.getClientRects().length === 0)`), "Print should hide application navigation and controls");
+    assert.ok(await evaluate(`document.querySelector('thead') && getComputedStyle(document.querySelector('thead')).display === 'table-header-group'`));
+    await evaluate(`document.fonts.ready`);
+    const pdf = await call("Page.printToPDF", { printBackground: true, preferCSSPageSize: true });
+    assert.ok(pdf.data.startsWith("JVBERi"), "Browser print should produce a PDF document");
+    await call("Emulation.setEmulatedMedia", { media: "screen" });
+    await evaluate(`(() => { const original = URL.createObjectURL; URL.createObjectURL = (blob) => { window.__invoicePdf = { type: blob.type, size: blob.size }; return original(blob); }; document.addEventListener('click', e => { if (e.target instanceof HTMLAnchorElement && e.target.hasAttribute('download')) e.preventDefault(); }, true); })()`);
+    await evaluate(`Array.from(document.querySelectorAll('button')).find(x => x.innerText === 'دانلود PDF').click()`);
+    await until(`window.__invoicePdf?.type === 'application/pdf' && window.__invoicePdf.size > 1000`, "Invoice PDF download did not complete");
     console.log("Receipt, supplier payment and party report browser checks passed.");
   } finally {
     socket?.close();

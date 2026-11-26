@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { MonthlyChart } from "./monthly-chart";
+import { SalesOverview } from "./sales-overview";
+import { BalanceOverview } from "./balance-overview";
 
 type Year = { id: string; name: string; status: "OPEN" | "CLOSED" };
 type Summary = {
@@ -13,7 +15,7 @@ type Summary = {
 const amount = (value: string) => BigInt(value).toLocaleString("fa-IR");
 const dateFormat = new Intl.DateTimeFormat("fa-IR", { dateStyle: "medium", timeZone: "UTC" });
 
-export function DashboardSummary({ years }: { years: Year[] }) {
+export function DashboardSummary({ years, cashAccounts }: { years: Year[]; cashAccounts: { id: string; code: string; name: string; isActive: boolean }[] }) {
   const [year, setYear] = useState(years.find((item) => item.status === "OPEN")?.id ?? years[0].id);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState("");
@@ -41,13 +43,15 @@ export function DashboardSummary({ years }: { years: Year[] }) {
       <div><h2 className="font-modam text-lg font-bold text-slate-900">خلاصه عملکرد</h2><p className="mt-1 text-sm text-slate-500">اطلاعات بر اساس سال مالی انتخاب‌شده</p></div>
       <label className="w-full text-sm font-medium text-slate-700 sm:w-64">سال مالی<select value={year} onChange={(event) => { setYear(event.target.value); setSummary(null); setError(""); }} className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-100">{years.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.status === "OPEN" ? "باز" : "بسته"}</option>)}</select></label>
     </div>
+    <SalesOverview key={year} yearId={year} />
+    <BalanceOverview yearId={year} accounts={cashAccounts} />
     {error ? <div role="alert" className="rounded-xl bg-red-50 p-5 text-sm text-red-700">{error} <button type="button" onClick={() => { setError(""); setSummary(null); setAttempt((value) => value + 1); }} className="font-semibold underline underline-offset-4">تلاش دوباره</button></div> : !summary ? <p role="status" className="rounded-xl bg-white p-6 text-sm text-slate-600">در حال دریافت اطلاعات داشبورد…</p> : <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <Metric title="خالص درآمد" value={`${amount(summary.revenue)} ریال`} detail="اسناد نهایی سال مالی" />
         <Metric title="خالص هزینه" value={`${amount(summary.expenses)} ریال`} detail="اسناد نهایی سال مالی" />
         <Metric title={profit < 0n ? "زیان" : profit > 0n ? "سود" : "سود و زیان"} value={`${(profit < 0n ? -profit : profit).toLocaleString("fa-IR")} ریال`} detail="درآمد منهای هزینه" highlight={profit < 0n ? "loss" : "profit"} />
       </div>
-      <p className="text-xs leading-6 text-slate-500">مبالغ بر اساس گردش مستقیم حساب‌های درآمد و هزینه در اسناد نهایی کل سال مالی محاسبه شده‌اند؛ فرایند اختتامیه هنوز پیاده‌سازی نشده است.</p>
+      <p className="text-xs leading-6 text-slate-500">مبالغ بر اساس گردش مستقیم حساب‌های درآمد و هزینه در اسناد نهایی کل سال مالی محاسبه شده‌اند؛ ردیف‌های بستن حساب‌های موقت در عملکرد لحاظ نمی‌شوند.</p>
       <MonthlyChart key={year} yearId={year} />
       <div className="grid gap-5 lg:grid-cols-3">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">

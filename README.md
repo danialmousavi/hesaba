@@ -41,6 +41,8 @@ npm run dev
 
 برنامه معمولاً در `http://localhost:3000` باز می‌شود؛ اگر پورت دیگری استفاده شود، پیام ترمینال و `BETTER_AUTH_URL` را بررسی کنید. برای توقف PostgreSQL می‌توانید `docker compose --env-file .env.local down` را اجرا کنید؛ این دستور volume را حذف نمی‌کند.
 
+برای دانلود PDF فاکتور، Chrome یا Edge باید روی سیستمی که Next.js روی آن اجرا می‌شود نصب باشد. برنامه مسیرهای معمول را بررسی می‌کند؛ اگر مرورگر در مسیر دیگری نصب شده است، مسیر مطلق آن را با `HESABA_PDF_BROWSER` در `.env.local` تنظیم و سرور را دوباره اجرا کنید. فایل با فونت‌های پروژه و مرورگر محلی ساخته می‌شود.
+
 اگر پس از تغییر مدل Prisma خطایی مانند ناشناخته بودن مدل یا `Cannot read properties of undefined (reading 'findMany')` دیدید، سرور توسعه را با `Ctrl+C` متوقف کنید، `npx prisma generate` و در صورت وجود migration جدید `npx prisma migrate deploy` را اجرا کنید، سپس `npm run dev` را دوباره اجرا کنید.
 
 ## تست
@@ -67,4 +69,4 @@ node scripts/seed-demo.mjs <organization-id>
 
 ## متغیرهای محیطی
 
-`POSTGRES_DB`، `POSTGRES_USER` و `POSTGRES_PASSWORD` برای سرویس نمونه Docker هستند؛ `DATABASE_URL` اتصال برنامه و Prisma را مشخص می‌کند. `BETTER_AUTH_SECRET` و `BETTER_AUTH_URL` برای احراز هویت‌اند. `OLLAMA_BASE_URL` و `OLLAMA_MODEL` برای فاز آینده در نظر گرفته شده‌اند؛ اتصال AI هنوز ساخته نشده است. مقادیر نمونه در `.env.example` هستند؛ `.env.local` نباید وارد Git شود.
+`POSTGRES_DB`، `POSTGRES_USER` و `POSTGRES_PASSWORD` برای سرویس نمونه Docker هستند؛ `DATABASE_URL` اتصال برنامه و Prisma را مشخص می‌کند. `BETTER_AUTH_SECRET` و `BETTER_AUTH_URL` برای احراز هویت‌اند. `HESABA_PDF_BROWSER` مسیر اختیاری Chrome یا Edge برای ساخت PDF است. `OLLAMA_BASE_URL` و `OLLAMA_MODEL` برای فاز آینده در نظر گرفته شده‌اند؛ اتصال AI هنوز ساخته نشده است. مقادیر نمونه در `.env.example` هستند؛ `.env.local` نباید وارد Git شود.
