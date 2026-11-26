@@ -1,8 +1,6 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
-import { auth } from "@/lib/auth";
 import { calculateInvoice } from "@/lib/invoice-calculation";
-import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
 export const invoiceLineInputSchema = z.strictObject({
@@ -14,12 +12,6 @@ export const invoiceInputSchema = z.strictObject({
   description: z.string().trim().max(500).nullable().optional(),
   lines: z.array(invoiceLineInputSchema).min(1).max(100),
 });
-
-export async function invoiceMembership(request: Request) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return null;
-  return prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true } });
-}
 
 export const invoiceFields = {
   id: true, fiscalYearId: true, customerId: true, customerName: true, date: true,

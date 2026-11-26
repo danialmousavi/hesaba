@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
-import { invoiceMembership } from "@/lib/invoice-api";
+import { organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 const querySchema = z.strictObject({
@@ -13,8 +13,8 @@ const querySchema = z.strictObject({
 });
 
 export async function GET(request: Request) {
-  const member = await invoiceMembership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(request.url).searchParams.entries()));
   if (!parsed.success) return Response.json({ error: "پارامترهای گزارش معتبر نیستند." }, { status: 400 });
   const { fiscalYearId, search, role, status, page, pageSize } = parsed.data;

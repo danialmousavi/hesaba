@@ -1,12 +1,10 @@
-import { auth } from "@/lib/auth";
+import { organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 import { dashboardDateRange, parseDashboardFilters } from "@/lib/dashboard-date-range";
 
 export async function GET(request: Request) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true } });
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 403 });
+  const member = await organizationContext(request, 403).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const filters = parseDashboardFilters(new URL(request.url).searchParams);
   if (!filters) return Response.json({ error: "سال مالی و بازه زمانی معتبر انتخاب کنید." }, { status: 400 });
   try {

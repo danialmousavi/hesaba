@@ -1,16 +1,15 @@
 import { z } from "zod";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isTransactionConflict } from "@/lib/prisma-errors";
 import { financialDraftEditInput } from "@/lib/financial-transaction-input";
 import { lockFinancialAccounts } from "@/lib/financial-accounts";
+import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true } });
-  if (!member || member.role === "VIEWER") return Response.json({ error: "اجازه ویرایش پیش‌نویس ندارید." }, { status: 403 });
+  const member = await organizationContext(request, 403).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
+  if (member.role === "VIEWER") return Response.json({ error: "اجازه ویرایش پیش‌نویس ندارید." }, { status: 403 });
   const id = z.string().cuid().safeParse((await params).id);
   if (!id.success) return Response.json({ error: "شناسه پیش‌نویس معتبر نیست." }, { status: 400 });
   const parsed = financialDraftEditInput.safeParse(await request.json().catch(() => null));
@@ -19,6 +18,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== parsed.data.date) return Response.json({ error: "تاریخ معتبر نیست." }, { status: 400 });
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, member, request, ["ADMIN", "ACCOUNTANT"]);
       const initial = await tx.financialTransaction.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: { fiscalYearId: true } });
       if (!initial) return { status: 404, error: "پیش‌نویس پیدا نشد." } as const;
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${initial.fiscalYearId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
@@ -36,6 +36,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ transaction: result.transaction }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     if (isTransactionConflict(error)) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Financial draft update failed", error);
     return Response.json({ error: "ویرایش پیش‌نویس درآمد و هزینه انجام نشد." }, { status: 500 });
@@ -44,14 +46,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true } });
-  if (!member || member.role === "VIEWER") return Response.json({ error: "اجازه حذف پیش‌نویس ندارید." }, { status: 403 });
+  const member = await organizationContext(request, 403).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
+  if (member.role === "VIEWER") return Response.json({ error: "اجازه حذف پیش‌نویس ندارید." }, { status: 403 });
   const id = z.string().cuid().safeParse((await params).id);
   if (!id.success) return Response.json({ error: "شناسه پیش‌نویس معتبر نیست." }, { status: 400 });
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, member, request, ["ADMIN", "ACCOUNTANT"]);
       const initial = await tx.financialTransaction.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: { fiscalYearId: true } });
       if (!initial) return { status: 404, error: "پیش‌نویس پیدا نشد." } as const;
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${initial.fiscalYearId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
@@ -66,6 +68,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ deleted: true }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     if (isTransactionConflict(error)) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Financial draft deletion failed", error);
     return Response.json({ error: "حذف پیش‌نویس درآمد و هزینه انجام نشد." }, { status: 500 });

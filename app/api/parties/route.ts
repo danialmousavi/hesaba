@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { createPartySchema, partyFields } from "@/lib/party-validation";
+import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { isTransactionConflict } from "@/lib/prisma-errors";
 
 const querySchema = z.object({
   search: z.string().trim().max(150).default(""),
@@ -12,15 +13,9 @@ const querySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
 
-async function membership(request: Request) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return null;
-  return prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true } });
-}
-
 export async function GET(request: Request) {
-  const member = await membership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const params = new URL(request.url).searchParams;
   const parsed = querySchema.safeParse(Object.fromEntries(params.entries()));
   if (!parsed.success) return Response.json({ error: "پارامترهای جست‌وجو معتبر نیستند." }, { status: 400 });
@@ -45,15 +40,21 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
-  const member = await membership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   if (member.role === "VIEWER") return Response.json({ error: "نقش مشاهده‌گر اجازه ثبت شخص ندارد." }, { status: 403 });
   const parsed = createPartySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues[0]?.message ?? "اطلاعات معتبر نیست." }, { status: 400 });
   try {
-    const party = await prisma.party.create({ data: { ...parsed.data, organizationId: member.organizationId }, select: partyFields });
+    const party = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, member, request, ["ADMIN", "ACCOUNTANT"]);
+      return tx.party.create({ data: { ...parsed.data, organizationId: member.organizationId }, select: partyFields });
+    }, { isolationLevel: "Serializable" });
     return Response.json({ party }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
+    if (isTransactionConflict(error)) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Party creation failed", error);
     return Response.json({ error: "ثبت شخص انجام نشد." }, { status: 500 });
   }

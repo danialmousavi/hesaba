@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { lockJournalAccounts, markPartyAccountsUsed } from "@/lib/journal-account-locks";
 import { isTransactionConflict } from "@/lib/prisma-errors";
+import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const amount = z.string().regex(/^(0|[1-9]\d{0,19})$/);
 const schema = z.object({
@@ -14,10 +14,8 @@ const schema = z.object({
 }).strict();
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true } });
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 403 });
+  const member = await organizationContext(request, 403).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const { id } = await params;
   if (!z.string().cuid().safeParse(id).success) return Response.json({ error: "شناسه سند معتبر نیست." }, { status: 400 });
   try {
@@ -33,10 +31,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true } });
-  if (!member || member.role === "VIEWER") return Response.json({ error: "اجازهٔ ویرایش سند ندارید." }, { status: 403 });
+  const member = await organizationContext(request, 403).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
+  if (member.role === "VIEWER") return Response.json({ error: "اجازهٔ ویرایش سند ندارید." }, { status: 403 });
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "اطلاعات سند معتبر نیست." }, { status: 400 });
   const date = new Date(`${parsed.data.date}T00:00:00.000Z`);
@@ -44,6 +41,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, member, request, ["ADMIN", "ACCOUNTANT"]);
       const initial = await tx.journalEntry.findFirst({ where: { id, organizationId: member.organizationId }, select: { fiscalYearId: true } });
       if (!initial) return { status: 404, error: "سند پیدا نشد." } as const;
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${initial.fiscalYearId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
@@ -63,6 +61,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ entry: result.entry });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return Response.json({ error: "شمارهٔ سند در این سال مالی تکراری است." }, { status: 409 });
     if (isTransactionConflict(error)) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Journal draft update failed", error);
@@ -72,13 +72,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true } });
-  if (!member || member.role === "VIEWER") return Response.json({ error: "اجازهٔ حذف پیش‌نویس ندارید." }, { status: 403 });
+  const member = await organizationContext(request, 403).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
+  if (member.role === "VIEWER") return Response.json({ error: "اجازهٔ حذف پیش‌نویس ندارید." }, { status: 403 });
   const { id } = await params;
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, member, request, ["ADMIN", "ACCOUNTANT"]);
       const initial = await tx.journalEntry.findFirst({ where: { id, organizationId: member.organizationId }, select: { fiscalYearId: true } });
       if (!initial) return { status: 404, error: "سند پیدا نشد." } as const;
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${initial.fiscalYearId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
@@ -89,7 +89,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       if (entry.fiscalYear.status !== "OPEN") return { status: 409, error: "حذف پیش‌نویس در سال مالی بسته مجاز نیست." } as const;
       if (entry.reversalOf) {
         await tx.journalReversal.delete({ where: { organizationId_sourceEntryId: { organizationId: member.organizationId, sourceEntryId: entry.reversalOf.sourceEntryId } } });
-        await tx.journalEvent.create({ data: { organizationId: member.organizationId, entryId: entry.reversalOf.sourceEntryId, actorId: session.user.id, actorName: session.user.name, action: "REVERSAL_DRAFT_DELETED" } });
+        await tx.journalEvent.create({ data: { organizationId: member.organizationId, entryId: entry.reversalOf.sourceEntryId, actorId: member.userId, actorName: member.userName, action: "REVERSAL_DRAFT_DELETED" } });
       }
       await tx.journalLine.deleteMany({ where: { organizationId: member.organizationId, entryId: id } });
       await tx.journalEntry.delete({ where: { id } });
@@ -98,6 +98,9 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ deleted: true });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
+    if (isTransactionConflict(error)) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Journal draft deletion failed", error);
     return Response.json({ error: "حذف پیش‌نویس انجام نشد." }, { status: 500 });
   }

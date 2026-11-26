@@ -20,7 +20,7 @@ export default async function TransactionsPage() {
   return <section>
     <p className="text-sm font-semibold text-emerald-700">عملیات مالی · {member.organization.name}</p>
     <h1 className="mt-3 font-modam text-3xl font-bold">درآمد و هزینه</h1>
-    <p className="mt-3 text-sm leading-7 text-slate-600">پیش‌نویس درآمد و هزینه را ثبت و بررسی کنید.</p>
+    <p className="mt-3 text-sm leading-7 text-slate-600">پیش‌نویس‌ها و درآمد و هزینه‌های ثبت‌شده را بررسی کنید.</p>
     <Transactions years={serializedYears} accounts={accounts} canWrite={member.role !== "VIEWER"} />
   </section>;
 }

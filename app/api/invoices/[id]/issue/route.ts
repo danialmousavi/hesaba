@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
-import { auth } from "@/lib/auth";
-import { invoiceFields, invoiceMembership, serializeInvoice } from "@/lib/invoice-api";
+import { invoiceFields, serializeInvoice } from "@/lib/invoice-api";
 import { calculateInvoice, InvoiceCalculationError } from "@/lib/invoice-calculation";
 import { lockJournalAccounts, markPartyAccountsUsed } from "@/lib/journal-account-locks";
 import { prisma } from "@/lib/prisma";
 import { isTransactionConflict } from "@/lib/prisma-errors";
+import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const inputSchema = z.strictObject({
   revision: z.number().int().min(0).max(2147483646),
@@ -15,10 +15,9 @@ const inputSchema = z.strictObject({
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
-  const member = await invoiceMembership(request);
-  if (!member || member.role === "VIEWER") return Response.json({ error: "اجازه صدور فاکتور ندارید." }, { status: 403 });
+  const member = await organizationContext(request, 403).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
+  if (member.role === "VIEWER") return Response.json({ error: "اجازه صدور فاکتور ندارید." }, { status: 403 });
   const id = z.string().cuid().safeParse((await params).id);
   if (!id.success) return Response.json({ error: "شناسه فاکتور معتبر نیست." }, { status: 400 });
   const parsed = inputSchema.safeParse(await request.json().catch(() => null));
@@ -26,6 +25,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const input = parsed.data;
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, member, request, ["ADMIN", "ACCOUNTANT"]);
       const initial = await tx.invoice.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: { fiscalYearId: true } });
       if (!initial) return { status: 404, error: "فاکتور پیدا نشد." } as const;
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${initial.fiscalYearId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
@@ -69,13 +69,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const entry = await tx.journalEntry.create({ data: { organizationId: member.organizationId, fiscalYearId: invoice.fiscalYearId, number: journalNumber, date: invoice.date, description: `فاکتور فروش ${invoiceNumber} — ${invoice.customerName}`, lines: { create: lines } }, select: { id: true } });
       await markPartyAccountsUsed(tx, member.organizationId, accountIds);
       await tx.journalEntry.update({ where: { id: entry.id }, data: { status: "POSTED" } });
-      await tx.journalEvent.create({ data: { organizationId: member.organizationId, entryId: entry.id, actorId: session.user.id, actorName: session.user.name, action: "POSTED" } });
+      await tx.journalEvent.create({ data: { organizationId: member.organizationId, entryId: entry.id, actorId: member.userId, actorName: member.userName, action: "POSTED" } });
       const issued = await tx.invoice.update({ where: { id: invoice.id }, data: { status: "ISSUED", number: invoiceNumber, journalEntryId: entry.id, revision: { increment: 1 } }, select: invoiceFields });
       return { status: 200, invoice: serializeInvoice(issued), journal: { id: entry.id, number: journalNumber } } as const;
     }, { isolationLevel: "Serializable" });
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ invoice: result.invoice, journal: result.journal }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     if (error instanceof InvoiceCalculationError) return Response.json({ error: "مبالغ فاکتور معتبر نیستند." }, { status: 400 });
     if (isTransactionConflict(error) || (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ فاکتور را دوباره بررسی کنید." }, { status: 409 });
     console.error("Invoice issuing failed", error);

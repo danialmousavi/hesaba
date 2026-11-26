@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Account, Year } from "./types";
 import { TransactionForm } from "./transaction-form";
 import { DraftList } from "./draft-list";
+import { PostedList } from "./posted-list";
 
 export function Transactions({ years, accounts, canWrite }: { years: Year[]; accounts: Account[]; canWrite: boolean }) {
   const [revision, setRevision] = useState(0);
@@ -16,5 +17,6 @@ export function Transactions({ years, accounts, canWrite }: { years: Year[]; acc
       </section>
       <DraftList years={years} accounts={accounts} canWrite={canWrite} revision={revision} onChanged={() => setRevision((value) => value + 1)} />
     </div>
+    <PostedList years={years} revision={revision} />
   </>;
 }

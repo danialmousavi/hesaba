@@ -1,21 +1,15 @@
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isTransactionConflict } from "@/lib/prisma-errors";
+import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const inputSchema = z.strictObject({ purpose: z.enum(["RECEIVABLE", "PAYABLE"]), accountId: z.string().cuid().nullable() });
 const idSchema = z.string().cuid();
 
-async function membership(request: Request) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return null;
-  return prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true, user: { select: { id: true, name: true } } } });
-}
-
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const member = await membership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const id = idSchema.safeParse((await params).id);
   if (!id.success) return Response.json({ error: "شناسه شخص معتبر نیست." }, { status: 400 });
   try {
@@ -30,8 +24,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
-  const member = await membership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   if (member.role !== "ADMIN") return Response.json({ error: "فقط مدیر می‌تواند اتصال حساب را تغییر دهد." }, { status: 403 });
   const id = idSchema.safeParse((await params).id);
   if (!id.success) return Response.json({ error: "شناسه شخص معتبر نیست." }, { status: 400 });
@@ -40,6 +34,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const { purpose, accountId } = parsed.data;
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, member, request, ["ADMIN"]);
       await tx.$queryRaw`SELECT id FROM "Party" WHERE id = ${id.data} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
       const party = await tx.party.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: { isActive: true, isCustomer: true, isSupplier: true } });
       if (!party) return { error: "شخص پیدا نشد.", status: 404 } as const;
@@ -59,12 +54,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       if (old && accountId) await tx.partyAccount.update({ where: { id: old.id }, data: { accountId } });
       else if (old) await tx.partyAccount.delete({ where: { id: old.id } });
       else if (accountId) await tx.partyAccount.create({ data: { organizationId: member.organizationId, partyId: id.data, purpose, accountId } });
-      await tx.partyAccountEvent.create({ data: { organizationId: member.organizationId, partyId: id.data, purpose, type: old ? (accountId ? "CHANGED" : "UNLINKED") : "LINKED", actorId: member.user.id, actorName: member.user.name, oldAccountId: old?.accountId ?? null, newAccountId: accountId } });
+      await tx.partyAccountEvent.create({ data: { organizationId: member.organizationId, partyId: id.data, purpose, type: old ? (accountId ? "CHANGED" : "UNLINKED") : "LINKED", actorId: member.userId, actorName: member.userName, oldAccountId: old?.accountId ?? null, newAccountId: accountId } });
       return { changed: true } as const;
     }, { isolationLevel: "Serializable" });
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     if (isTransactionConflict(error) || (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) return Response.json({ error: "تغییر هم‌زمان یا استفاده تکراری از حساب رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Party account update failed", error);
     return Response.json({ error: "تغییر اتصال حساب انجام نشد." }, { status: 500 });

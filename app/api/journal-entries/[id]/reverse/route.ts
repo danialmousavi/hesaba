@@ -1,18 +1,17 @@
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
-import { auth } from "@/lib/auth";
 import { lockJournalAccounts, markPartyAccountsUsed } from "@/lib/journal-account-locks";
 import { prisma } from "@/lib/prisma";
 import { isTransactionConflict } from "@/lib/prisma-errors";
+import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const schema = z.strictObject({ fiscalYearId: z.string().cuid(), date: z.iso.date(), description: z.string().trim().min(1).max(500).optional() });
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true } });
-  if (!member || member.role === "VIEWER") return Response.json({ error: "اجازه ایجاد سند برگشتی ندارید." }, { status: 403 });
+  const member = await organizationContext(request, 403).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
+  if (member.role === "VIEWER") return Response.json({ error: "اجازه ایجاد سند برگشتی ندارید." }, { status: 403 });
   const id = z.string().cuid().safeParse((await params).id);
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!id.success || !parsed.success) return Response.json({ error: "اطلاعات سند برگشتی معتبر نیست." }, { status: 400 });
@@ -21,6 +20,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== input.date) return Response.json({ error: "تاریخ معتبر نیست." }, { status: 400 });
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, member, request, ["ADMIN", "ACCOUNTANT"]);
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${input.fiscalYearId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
       const year = await tx.fiscalYear.findFirst({ where: { id: input.fiscalYearId, organizationId: member.organizationId, status: "OPEN", startDate: { lte: date }, endDate: { gte: date } }, select: { id: true } });
       if (!year) return { status: 400, error: "سال مالی باز یا تاریخ معتبر نیست." } as const;
@@ -43,13 +43,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (number > 2147483647) return { status: 409, error: "شماره سند جدید در دسترس نیست." } as const;
       const entry = await tx.journalEntry.create({ data: { organizationId: member.organizationId, fiscalYearId: year.id, number, date, description: input.description ?? `برگشت سند ${source.number} — ${source.description}`.slice(0, 500), lines: { create: source.lines.map((line) => ({ accountId: line.accountId, description: line.description, debit: line.credit, credit: line.debit })) } }, select: { id: true, fiscalYearId: true, number: true, date: true, description: true, status: true, lines: { select: { accountId: true, description: true, debit: true, credit: true } } } });
       await markPartyAccountsUsed(tx, member.organizationId, ids);
-      await tx.journalReversal.create({ data: { organizationId: member.organizationId, sourceEntryId: source.id, reversalEntryId: entry.id, actorId: session.user.id, actorName: session.user.name } });
-      await tx.journalEvent.create({ data: { organizationId: member.organizationId, entryId: source.id, actorId: session.user.id, actorName: session.user.name, action: "REVERSAL_DRAFT_CREATED" } });
+      await tx.journalReversal.create({ data: { organizationId: member.organizationId, sourceEntryId: source.id, reversalEntryId: entry.id, actorId: member.userId, actorName: member.userName } });
+      await tx.journalEvent.create({ data: { organizationId: member.organizationId, entryId: source.id, actorId: member.userId, actorName: member.userName, action: "REVERSAL_DRAFT_CREATED" } });
       return { status: 201, entry, source: { id: source.id, number: source.number } } as const;
     }, { isolationLevel: "Serializable" });
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ entry: result.entry, source: result.source }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     if (isTransactionConflict(error) || (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) return Response.json({ error: "تغییر هم‌زمان رخ داد یا برگشت قبلاً ایجاد شده است؛ فهرست اسناد را بررسی کنید." }, { status: 409 });
     console.error("Journal reversal creation failed", error);
     return Response.json({ error: "ایجاد پیش‌نویس برگشتی انجام نشد." }, { status: 500 });

@@ -1,12 +1,10 @@
 import { z } from "zod";
-import { auth } from "@/lib/auth";
+import { organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(request: Request) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true } });
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 403 });
+  const member = await organizationContext(request, 403).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const search = new URL(request.url).searchParams;
   const params = z.object({ fiscalYearId: z.string().cuid(), accountId: z.string().cuid() }).safeParse({ fiscalYearId: search.get("fiscalYearId"), accountId: search.get("accountId") });
   if (!params.success) return Response.json({ error: "سال مالی و حساب معتبر انتخاب کنید." }, { status: 400 });

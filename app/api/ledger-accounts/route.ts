@@ -1,7 +1,8 @@
 import { Prisma } from "@/generated/prisma/client";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { isTransactionConflict } from "@/lib/prisma-errors";
 
 const inputSchema = z.object({
   code: z.string().trim().regex(/^\d{1,20}$/, "کد حساب باید فقط شامل ۱ تا ۲۰ رقم باشد."),
@@ -10,19 +11,9 @@ const inputSchema = z.object({
   parentId: z.string().cuid().nullable().optional(),
 });
 
-async function membership(request: Request) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return null;
-  return prisma.membership.findFirst({
-    where: { userId: session.user.id },
-    orderBy: { createdAt: "asc" },
-    select: { organizationId: true, role: true },
-  });
-}
-
 export async function GET(request: Request) {
-  const member = await membership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const accounts = await prisma.ledgerAccount.findMany({
     where: { organizationId: member.organizationId },
     orderBy: { code: "asc" },
@@ -35,8 +26,8 @@ export async function POST(request: Request) {
   if (request.headers.get("origin") !== new URL(request.url).origin) {
     return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
   }
-  const member = await membership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   if (member.role !== "ADMIN") {
     return Response.json({ error: "فقط مدیر سازمان می‌تواند حساب ایجاد کند." }, { status: 403 });
   }
@@ -46,6 +37,7 @@ export async function POST(request: Request) {
   const parentId = parsed.data.parentId ?? null;
   try {
     const account = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, member, request, ["ADMIN"]);
       if (parentId) {
         await tx.$queryRaw`SELECT id FROM "LedgerAccount" WHERE id = ${parentId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
         const parent = await tx.ledgerAccount.findFirst({ where: { id: parentId, organizationId: member.organizationId }, select: { type: true, isActive: true } });
@@ -57,10 +49,12 @@ export async function POST(request: Request) {
     if (!account) return Response.json({ error: "حساب والد باید فعال، هم‌نوع و متعلق به سازمان شما باشد و به شخصی اختصاص نیافته باشد." }, { status: 400 });
     return Response.json({ account }, { status: 201 });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return Response.json({ error: "این کد حساب در سازمان شما قبلاً استفاده شده است." }, { status: 409 });
     }
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
+    if (isTransactionConflict(error)) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Ledger account creation failed", error);
     return Response.json({ error: "ایجاد حساب انجام نشد." }, { status: 500 });
   }

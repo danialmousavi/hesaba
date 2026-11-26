@@ -1,6 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { z } from "zod";
-import { invoiceMembership } from "@/lib/invoice-api";
+import { organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 const dateSchema = z.iso.date().refine((value) => {
@@ -19,8 +19,8 @@ type Row = { id: string; number: number; date: Date; customerId: string; custome
 type Totals = { count: string; subtotal: string; discount: string; tax: string; amount: string; paid: string; remaining: string; invalid: string };
 
 export async function GET(request: Request) {
-  const member = await invoiceMembership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const params = new URL(request.url).searchParams;
   if ([...params.keys()].some((key) => params.getAll(key).length !== 1)) return Response.json({ error: "پارامتر تکراری معتبر نیست." }, { status: 400 });
   const parsed = querySchema.safeParse(Object.fromEntries(params.entries()));

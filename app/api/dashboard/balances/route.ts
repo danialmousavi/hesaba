@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { invoiceMembership } from "@/lib/invoice-api";
+import { organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(request: Request) {
-  const member = await invoiceMembership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const params = new URL(request.url).searchParams;
   const cashIds = params.getAll("cashAccountId");
   if ([...params.keys()].some((key) => key !== "fiscalYearId" && key !== "cashAccountId") || params.getAll("fiscalYearId").length !== 1 || cashIds.length > 100 || new Set(cashIds).size !== cashIds.length || cashIds.some((id) => !z.string().cuid().safeParse(id).success)) return Response.json({ error: "پارامترهای شاخص معتبر نیستند." }, { status: 400 });

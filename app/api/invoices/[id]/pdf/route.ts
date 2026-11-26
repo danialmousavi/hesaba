@@ -1,14 +1,12 @@
 import { z } from "zod";
-import { auth } from "@/lib/auth";
-import { invoiceFields, invoiceMembership, serializeInvoice } from "@/lib/invoice-api";
+import { invoiceFields, serializeInvoice } from "@/lib/invoice-api";
 import { createInvoicePdf, PdfUnavailableError } from "@/lib/invoice-pdf";
 import { prisma } from "@/lib/prisma";
+import { organizationContext, organizationContextError } from "@/lib/organization-context";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
-  const member = await invoiceMembership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 403 });
+  const member = await organizationContext(request, 403).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const id = z.string().cuid().safeParse((await params).id);
   if (!id.success) return Response.json({ error: "شناسه فاکتور معتبر نیست." }, { status: 400 });
   try {

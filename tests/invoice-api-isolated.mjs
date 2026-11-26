@@ -33,6 +33,7 @@ try {
     if (!ready) await new Promise((resolve) => setTimeout(resolve, 500));
   }
   assert.ok(ready, `Server did not start: ${stderr}`);
+  assert.equal((await fetch(`${base}/api/organizations/active`)).status, 404);
   async function signup() {
     const response = await fetch(`${base}/api/auth/sign-up/email`, { method: "POST", headers: { origin: base, "content-type": "application/json" }, body: JSON.stringify({ name: "Test", email: `${randomUUID()}@example.invalid`, password: randomUUID() }) });
     assert.equal(response.status, 200, await response.clone().text());
@@ -282,7 +283,7 @@ try {
   assert.equal((await fetch(`${base}/api/receipts/invoices?partyId=${customer}`, { headers: headers(other) })).status, 404);
   const last = { ...receiptInput, requestKey: randomUUID(), amount: "520", allocations: [{ invoiceId: draft.id, amount: "520" }] };
   const retries = await Promise.all([receiptPost(owner, last), receiptPost(owner, last)]);
-  assert.deepEqual(retries.map((response) => response.status).sort(), [200,201]);
+  assert.deepEqual(retries.map((response) => response.status).sort(), [200,201], JSON.stringify(await Promise.all(retries.map((response) => response.clone().text()))));
   const retryBodies = await Promise.all(retries.map((response) => response.json()));
   assert.equal(retryBodies[0].receipt.id, retryBodies[1].receipt.id);
   assert.equal((await receiptPost(owner, { ...last, requestKey: randomUUID() })).status, 409);

@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { lockJournalAccounts, markPartyAccountsUsed } from "@/lib/journal-account-locks";
 import { isTransactionConflict } from "@/lib/prisma-errors";
+import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const amount = z.string().regex(/^(0|[1-9]\d{0,19})$/, "مبلغ باید عدد صحیح غیرمنفی و حداکثر ۲۰ رقم باشد.");
 const schema = z.object({
@@ -19,15 +19,9 @@ const schema = z.object({
   }).strict().refine((line) => (line.debit === "0") !== (line.credit === "0"), "هر ردیف باید فقط یک مبلغ مثبت داشته باشد.")).min(1).max(100),
 }).strict();
 
-async function member(request: Request) {
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return null;
-  return prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true } });
-}
-
 export async function GET(request: Request) {
-  const membership = await member(request);
-  if (!membership) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const membership = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (membership instanceof Error) return organizationContextError(membership) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const params = new URL(request.url).searchParams;
   const allowed = ["fiscalYearId", "status", "from", "to", "q", "page", "pageSize"];
   if ([...params.keys()].some((key) => !allowed.includes(key) || params.getAll(key).length !== 1)) return Response.json({ error: "پارامترهای جست‌وجوی سند معتبر نیستند." }, { status: 400 });
@@ -58,8 +52,8 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
-  const membership = await member(request);
-  if (!membership) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const membership = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (membership instanceof Error) return organizationContextError(membership) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   if (membership.role === "VIEWER") return Response.json({ error: "اجازهٔ ایجاد سند ندارید." }, { status: 403 });
   const input = schema.safeParse(await request.json().catch(() => null));
   if (!input.success) return Response.json({ error: input.error.issues[0]?.message ?? "اطلاعات سند معتبر نیست." }, { status: 400 });
@@ -67,6 +61,7 @@ export async function POST(request: Request) {
   if (Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== input.data.date) return Response.json({ error: "تاریخ معتبر نیست." }, { status: 400 });
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, membership, request, ["ADMIN", "ACCOUNTANT"]);
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${input.data.fiscalYearId} AND "organizationId" = ${membership.organizationId} FOR UPDATE`;
       const year = await tx.fiscalYear.findFirst({ where: { id: input.data.fiscalYearId, organizationId: membership.organizationId, status: "OPEN", startDate: { lte: date }, endDate: { gte: date } }, select: { id: true } });
       if (!year) return null;
@@ -79,6 +74,8 @@ export async function POST(request: Request) {
     if (!result) return Response.json({ error: "سال مالی، تاریخ، حساب فعال یا وضعیت شخص متصل معتبر نیست؛ در صورت تغییر هم‌زمان دوباره تلاش کنید." }, { status: 400 });
     return Response.json({ entry: result }, { status: 201 });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return Response.json({ error: "شمارهٔ سند در این سال مالی تکراری است." }, { status: 409 });
     if (isTransactionConflict(error)) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Journal draft creation failed", error);

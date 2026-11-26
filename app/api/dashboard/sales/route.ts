@@ -1,13 +1,13 @@
 import { z } from "zod";
-import { invoiceMembership } from "@/lib/invoice-api";
+import { organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 const persianDate = new Intl.DateTimeFormat("en-US-u-ca-persian-nu-latn", { year: "numeric", month: "numeric", timeZone: "UTC" });
 type Day = { date: Date; count: string; amount: string; invalid: string };
 
 export async function GET(request: Request) {
-  const member = await invoiceMembership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const params = new URL(request.url).searchParams;
   if ([...params.keys()].some((key) => key !== "fiscalYearId" || params.getAll(key).length !== 1)) return Response.json({ error: "پارامترهای داشبورد معتبر نیستند." }, { status: 400 });
   const yearId = z.string().cuid().safeParse(params.get("fiscalYearId"));

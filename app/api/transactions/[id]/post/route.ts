@@ -1,21 +1,21 @@
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { lockFinancialAccounts } from "@/lib/financial-accounts";
 import { markPartyAccountsUsed } from "@/lib/journal-account-locks";
 import { isTransactionConflict } from "@/lib/prisma-errors";
+import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
-  const session = await auth.api.getSession({ headers: request.headers });
-  if (!session) return Response.json({ error: "ابتدا وارد حساب شوید." }, { status: 401 });
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true } });
-  if (!member || member.role === "VIEWER") return Response.json({ error: "اجازه ثبت نهایی ندارید." }, { status: 403 });
+  const member = await organizationContext(request, 403).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
+  if (member.role === "VIEWER") return Response.json({ error: "اجازه ثبت نهایی ندارید." }, { status: 403 });
   const id = z.string().cuid().safeParse((await params).id);
   if (!id.success) return Response.json({ error: "شناسه پیش‌نویس معتبر نیست." }, { status: 400 });
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, member, request, ["ADMIN", "ACCOUNTANT"]);
       const initial = await tx.financialTransaction.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: { fiscalYearId: true } });
       if (!initial) return { status: 404, error: "پیش‌نویس پیدا نشد." } as const;
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${initial.fiscalYearId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
@@ -36,13 +36,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const entry = await tx.journalEntry.create({ data: { organizationId: member.organizationId, fiscalYearId: record.fiscalYearId, number, date: record.date, description: record.description, lines: { create: [{ accountId: debitAccount, debit: amount, credit: "0" }, { accountId: creditAccount, debit: "0", credit: amount }] } }, select: { id: true } });
       await markPartyAccountsUsed(tx, member.organizationId, accountIds);
       await tx.journalEntry.update({ where: { id: entry.id }, data: { status: "POSTED" } });
-      await tx.journalEvent.create({ data: { organizationId: member.organizationId, entryId: entry.id, actorId: session.user.id, actorName: session.user.name, action: "POSTED" } });
+      await tx.journalEvent.create({ data: { organizationId: member.organizationId, entryId: entry.id, actorId: member.userId, actorName: member.userName, action: "POSTED" } });
       await tx.financialTransaction.update({ where: { id: record.id }, data: { status: "POSTED", journalEntryId: entry.id } });
       return { status: 200, journal: { id: entry.id, number }, transaction: { id: record.id, status: "POSTED" } } as const;
     }, { isolationLevel: "Serializable" });
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json({ transaction: result.transaction, journal: result.journal }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     if (isTransactionConflict(error) || (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Financial transaction posting failed", error);
     return Response.json({ error: "ثبت نهایی درآمد یا هزینه انجام نشد." }, { status: 500 });

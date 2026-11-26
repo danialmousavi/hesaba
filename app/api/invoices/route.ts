@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
-import { invoiceFields, invoiceInputSchema, invoiceMembership, serializeInvoice } from "@/lib/invoice-api";
+import { invoiceFields, invoiceInputSchema, serializeInvoice } from "@/lib/invoice-api";
 import { calculateInvoice, InvoiceCalculationError } from "@/lib/invoice-calculation";
 import { prisma } from "@/lib/prisma";
 import { isTransactionConflict } from "@/lib/prisma-errors";
+import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const querySchema = z.strictObject({
   fiscalYearId: z.string().cuid().optional(),
@@ -13,8 +14,8 @@ const querySchema = z.strictObject({
 });
 
 export async function GET(request: Request) {
-  const member = await invoiceMembership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const parsed = querySchema.safeParse(Object.fromEntries(new URL(request.url).searchParams.entries()));
   if (!parsed.success) return Response.json({ error: "پارامترهای فهرست معتبر نیستند." }, { status: 400 });
   const { fiscalYearId, status, page, pageSize } = parsed.data;
@@ -38,8 +39,8 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (request.headers.get("origin") !== new URL(request.url).origin) return Response.json({ error: "مبدأ درخواست معتبر نیست." }, { status: 403 });
-  const member = await invoiceMembership(request);
-  if (!member) return Response.json({ error: "دسترسی مجاز نیست." }, { status: 401 });
+  const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
+  if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   if (member.role === "VIEWER") return Response.json({ error: "نقش مشاهده‌گر اجازه ثبت فاکتور ندارد." }, { status: 403 });
   const parsed = invoiceInputSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "اطلاعات فاکتور معتبر نیست." }, { status: 400 });
@@ -49,6 +50,7 @@ export async function POST(request: Request) {
   try {
     calculateInvoice(input.lines);
     const invoice = await prisma.$transaction(async (tx) => {
+      await guardOrganizationWrite(tx, member, request, ["ADMIN", "ACCOUNTANT"]);
       await tx.$queryRaw`SELECT id FROM "FiscalYear" WHERE id = ${input.fiscalYearId} AND "organizationId" = ${member.organizationId} FOR UPDATE`;
       const year = await tx.fiscalYear.findFirst({ where: { id: input.fiscalYearId, organizationId: member.organizationId, status: "OPEN", startDate: { lte: date }, endDate: { gte: date } }, select: { id: true } });
       if (!year) return null;
@@ -72,6 +74,8 @@ export async function POST(request: Request) {
     if (!invoice) return Response.json({ error: "سال مالی، تاریخ، مشتری یا کالا معتبر و فعال نیست." }, { status: 400 });
     return Response.json({ invoice: serializeInvoice(invoice) }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     if (error instanceof InvoiceCalculationError) return Response.json({ error: "تعداد یا مبالغ فاکتور معتبر نیستند؛ تخفیف نباید از مبلغ قلم بیشتر باشد." }, { status: 400 });
     if (isTransactionConflict(error)) return Response.json({ error: "تغییر هم‌زمان رخ داد؛ دوباره تلاش کنید." }, { status: 409 });
     console.error("Invoice creation failed", error);
