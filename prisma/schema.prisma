@@ -13,6 +13,12 @@ enum OrganizationRole {
   VIEWER
 }
 
+enum MembershipEventType {
+  GRANTED
+  ROLE_CHANGED
+  REVOKED
+}
+
 enum FiscalYearStatus {
   OPEN
   CLOSED
@@ -111,6 +117,7 @@ model Organization {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   memberships Membership[]
+  membershipEvents MembershipEvent[]
   activeSessions Session[] @relation("SessionActiveOrganization")
   fiscalYears FiscalYear[]
   fiscalYearEvents FiscalYearEvent[]
@@ -520,6 +527,25 @@ model Membership {
 
   @@unique([userId, organizationId])
   @@index([organizationId])
+}
+
+model MembershipEvent {
+  id              String              @id @default(cuid())
+  organizationId  String
+  membershipId    String?
+  type            MembershipEventType
+  actorId         String
+  actorName       String
+  memberUserId    String
+  memberName      String
+  memberEmail     String
+  previousRole    OrganizationRole?
+  nextRole        OrganizationRole?
+  createdAt       DateTime            @default(now())
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, memberUserId, createdAt])
 }
 
 model Session {

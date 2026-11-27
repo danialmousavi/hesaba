@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invalidateOrganizationRequests } from "@/lib/organization-fetch";
 
 type Organization = { id: string; name: string; slug: string };
@@ -20,6 +20,7 @@ export function OrganizationPicker({ standalone = false }: { standalone?: boolea
   const [error, setError] = useState("");
   const [changedElsewhere, setChangedElsewhere] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const reloadButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -56,6 +57,35 @@ export function OrganizationPicker({ standalone = false }: { standalone?: boolea
     return () => { disposed = true; channel?.close(); window.removeEventListener("storage", onStorage); };
   }, []);
 
+  useEffect(() => {
+    const pageOrganizationId = currentPageOrganizationId();
+    if (standalone || !pageOrganizationId || !selection?.active) return;
+    let disposed = false;
+    const checkSelection = async () => {
+      try {
+        const result = await window.fetch("/api/organizations/active", { cache: "no-store" });
+        const data = await result.json();
+        if (!result.ok || data.state !== "ACTIVE" || data.active?.organization?.id !== pageOrganizationId) {
+          if (!disposed) {
+            invalidateOrganizationRequests();
+            setChangedElsewhere(true);
+          }
+        }
+      } catch {
+        // A transient network failure is shown by the next user operation; do not discard the current screen.
+      }
+    };
+    const interval = window.setInterval(() => { void checkSelection(); }, 15_000);
+    window.addEventListener("focus", checkSelection);
+    return () => { disposed = true; window.clearInterval(interval); window.removeEventListener("focus", checkSelection); };
+  }, [selection?.active?.organization?.id, standalone]);
+
+  useEffect(() => {
+    if (!changedElsewhere) return;
+    const frame = window.requestAnimationFrame(() => reloadButton.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [changedElsewhere]);
+
   async function change() {
     if (!selected || selected === selection?.active?.organization.id || pending) return;
     if (!standalone && !window.confirm("با تغییر سازمان، اطلاعات ذخیره‌نشده این صفحه از دست می‌رود. ادامه می‌دهید؟")) return;
@@ -73,7 +103,7 @@ export function OrganizationPicker({ standalone = false }: { standalone?: boolea
   }
 
   return <div className={standalone ? "space-y-4" : "text-right"}>
-    {changedElsewhere && <div role="alertdialog" aria-modal="true" aria-labelledby="organization-changed-title" className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-5"><div className="max-w-md rounded-2xl bg-white p-6 shadow-xl"><h2 id="organization-changed-title" className="font-modam text-lg font-bold">سازمان این نشست تغییر کرده است</h2><p className="mt-3 text-sm leading-7 text-slate-600">برای مشاهده اطلاعات سازمان فعلی باید صفحه را بازخوانی کنید. اطلاعات ذخیره‌نشده این صفحه ممکن است از دست برود.</p><button type="button" onClick={() => window.location.replace(new URL("/dashboard", window.location.origin).href)} className="mt-4 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">بازخوانی صفحه</button></div></div>}
+    {changedElsewhere && <div role="alertdialog" aria-modal="true" aria-labelledby="organization-changed-title" aria-describedby="organization-changed-description" className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-5"><div className="max-w-md rounded-2xl bg-white p-6 shadow-xl"><h2 id="organization-changed-title" className="font-modam text-lg font-bold">سازمان یا دسترسی این نشست تغییر کرده است</h2><p id="organization-changed-description" className="mt-3 text-sm leading-7 text-slate-600">برای مشاهده اطلاعات مجاز فعلی باید صفحه را بازخوانی کنید. اطلاعات ذخیره‌نشده این صفحه ممکن است از دست برود.</p><button ref={reloadButton} type="button" onClick={() => window.location.replace(new URL("/dashboard", window.location.origin).href)} className="mt-4 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">بازخوانی صفحه</button></div></div>}
     {error && <p role="alert" className="text-sm text-red-700">{error} <button type="button" onClick={() => setAttempt((value) => value + 1)} className="underline">تلاش دوباره</button></p>}
     {!selection && !error && <p role="status" className="text-sm text-slate-500">در حال دریافت سازمان‌ها…</p>}
     {selection && <div className="flex flex-wrap items-end gap-2">

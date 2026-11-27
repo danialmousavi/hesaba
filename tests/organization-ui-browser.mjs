@@ -4,7 +4,7 @@ import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-export async function testOrganizationBrowser({ chromePath, base, cookie, orgA, orgB }) {
+export async function testOrganizationBrowser({ chromePath, base, cookie, orgA, orgB, memberEmail }) {
   const root = await realpath(tmpdir()), profile = await mkdtemp(path.join(root, "hesaba-org-ui-"));
   const resolved = await realpath(profile);
   if (path.dirname(resolved).toLowerCase() !== root.toLowerCase() || !path.basename(resolved).startsWith("hesaba-org-ui-")) throw new Error("Unsafe browser profile path");
@@ -47,6 +47,14 @@ export async function testOrganizationBrowser({ chromePath, base, cookie, orgA, 
     await a.until(`!!document.querySelector('input[name="code"]')`, "Product form not ready");
     await a.evaluate(`(() => { const original = window.fetch; window.fetch = (url, options) => { if (String(url) === '/api/products' && options?.method === 'POST') window.__expectedOrg = new Headers(options.headers).get('x-expected-organization-id'); return original(url, options); }; const form = document.querySelector('input[name="code"]').form; for (const [name,value] of [['name','Browser test'],['code','browser-test'],['unit','عدد'],['salePrice','10']]) { const input = form.querySelector('input[name="' + name + '"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value); input.dispatchEvent(new Event('input',{bubbles:true})); } form.requestSubmit(); })()`);
     await a.until(`window.__expectedOrg === ${JSON.stringify(orgA)} && document.body.innerText.includes('با موفقیت ثبت شد')`, "Product write did not include expected organization");
+    if (memberEmail) {
+      await a.call("Page.navigate", { url: `${base}/dashboard/organization` });
+      await a.until(`!!document.querySelector('input[name="email"]')`, "Member form did not load");
+      await a.evaluate(`(() => { const form = document.querySelector('input[name="email"]').form; const email = form.querySelector('input[name="email"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(email, ${JSON.stringify(memberEmail)}); email.dispatchEvent(new Event('input', { bubbles: true })); form.requestSubmit(); })()`);
+      await a.until(`document.body.innerText.includes('Future member') && document.body.innerText.includes('به سازمان اضافه شد')`, "Member was not added through the organization page");
+    }
+    await a.call("Page.navigate", { url: `${base}/dashboard/profile` });
+    await a.until(`!!document.querySelector('input[name="name"]') && !!document.querySelector('input[name="currentPassword"]')`, "Profile and password forms did not load");
     console.log("Organization selector browser checks passed.");
   } finally {
     for (const socket of sockets) socket.close();

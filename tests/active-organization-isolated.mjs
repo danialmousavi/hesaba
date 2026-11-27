@@ -64,9 +64,64 @@ try {
   assert.equal((await select(second, "invalid")).status, 400);
   assert.equal((await (await select(second, orgB)).json()).active.role, "VIEWER");
   assert.equal((await (await get(first)).json()).active.organization.id, orgA);
+  const membersUrl = `${base}/api/organization/members`;
+  const futureMemberId = id(), futureMemberEmail = `${randomUUID()}@example.invalid`;
+  await db.query('INSERT INTO "User" (id,name,email,"updatedAt") VALUES ($1,$2,$3,now())', [futureMemberId, "Future member", futureMemberEmail]);
+  assert.equal((await fetch(membersUrl, { headers: headers(first) })).status, 200);
+  assert.equal((await fetch(membersUrl, { headers: headers(second) })).status, 403);
+  const memberPost = (body, expected = orgA) => fetch(membersUrl, { method: "POST", headers: { ...headers(first), "x-expected-organization-id": expected }, body: JSON.stringify(body) });
+  const addedMember = await memberPost({ email: `  ${futureMemberEmail.toUpperCase()}  `, role: "ACCOUNTANT" });
+  assert.equal(addedMember.status, 201, await addedMember.clone().text());
+  const addedMemberJson = await addedMember.json();
+  assert.equal(addedMemberJson.member.userId, futureMemberId); assert.equal(addedMemberJson.member.role, "ACCOUNTANT");
+  assert.equal((await memberPost({ email: futureMemberEmail, role: "VIEWER" })).status, 409);
+  assert.equal((await memberPost({ email: `${randomUUID()}@example.invalid`, role: "VIEWER" })).status, 422);
+  assert.equal((await memberPost({ email: futureMemberEmail, role: "VIEWER" }, orgB)).status, 409);
+  const memberList = await (await fetch(membersUrl, { headers: headers(first) })).json();
+  assert.ok(memberList.members.some((item) => item.id === addedMemberJson.member.id && item.user.email === futureMemberEmail));
+  const memberEvent = await db.query('SELECT type,"actorId","memberUserId","nextRole" FROM "MembershipEvent" WHERE "membershipId"=$1', [addedMemberJson.member.id]);
+  assert.deepEqual(memberEvent.rows[0], { type: "GRANTED", actorId: first.user.id, memberUserId: futureMemberId, nextRole: "ACCOUNTANT" });
+  const memberPatch = (user, membershipId, body, expected = orgA) => fetch(`${membersUrl}/${membershipId}`, { method: "PATCH", headers: { ...headers(user), "x-expected-organization-id": expected }, body: JSON.stringify(body) });
+  assert.equal((await memberPatch(first, addedMemberJson.member.id, { role: "VIEWER" }, orgB)).status, 409);
+  assert.equal((await memberPatch(second, addedMemberJson.member.id, { role: "VIEWER" }, orgB)).status, 403);
+  const changedMember = await memberPatch(first, addedMemberJson.member.id, { role: "VIEWER" });
+  assert.equal(changedMember.status, 200, await changedMember.clone().text());
+  assert.equal((await changedMember.json()).member.role, "VIEWER");
+  const sameRole = await memberPatch(first, addedMemberJson.member.id, { role: "VIEWER" });
+  assert.equal(sameRole.status, 200); assert.equal((await sameRole.json()).unchanged, true);
+  const firstMembershipId = (await db.query('SELECT id FROM "Membership" WHERE "userId"=$1 AND "organizationId"=$2', [first.user.id, orgA])).rows[0].id;
+  assert.equal((await memberPatch(first, firstMembershipId, { role: "ACCOUNTANT" })).status, 409);
+  const raceAdminId = id(), raceAdminEmail = `${randomUUID()}@example.invalid`;
+  await db.query('INSERT INTO "User" (id,name,email,"updatedAt") VALUES ($1,$2,$3,now())', [raceAdminId, "Race admin", raceAdminEmail]);
+  const addedRaceAdmin = await memberPost({ email: raceAdminEmail, role: "ADMIN" });
+  assert.equal(addedRaceAdmin.status, 201);
+  const raceMembershipId = (await addedRaceAdmin.json()).member.id;
+  const concurrentDemotions = await Promise.all([
+    memberPatch(first, firstMembershipId, { role: "ACCOUNTANT" }),
+    memberPatch(first, raceMembershipId, { role: "ACCOUNTANT" }),
+  ]);
+  assert.ok(concurrentDemotions.some((response) => response.status === 200));
+  assert.ok(concurrentDemotions.every((response) => [200, 403, 409].includes(response.status)));
+  assert.equal((await db.query('SELECT count(*)::int AS count FROM "Membership" WHERE "organizationId"=$1 AND role=\'ADMIN\'', [orgA])).rows[0].count, 1);
+  await db.query('UPDATE "Membership" SET role=\'ADMIN\' WHERE id=$1', [firstMembershipId]);
+  await db.query('DELETE FROM "Membership" WHERE id=$1', [raceMembershipId]);
+  const roleEvents = await db.query('SELECT type,"previousRole","nextRole" FROM "MembershipEvent" WHERE "membershipId"=$1 ORDER BY "createdAt"', [addedMemberJson.member.id]);
+  assert.equal(roleEvents.rows.filter((row) => row.type === "ROLE_CHANGED").length, 1);
+  assert.deepEqual(roleEvents.rows.find((row) => row.type === "ROLE_CHANGED"), { type: "ROLE_CHANGED", previousRole: "ACCOUNTANT", nextRole: "VIEWER" });
+  const memberDelete = (user, membershipId, expected = orgA) => fetch(`${membersUrl}/${membershipId}`, { method: "DELETE", headers: { ...headers(user), "x-expected-organization-id": expected } });
+  assert.equal((await memberDelete(first, addedMemberJson.member.id, orgB)).status, 409);
+  assert.equal((await memberDelete(second, addedMemberJson.member.id, orgB)).status, 403);
+  assert.equal((await memberDelete(first, firstMembershipId)).status, 409);
+  const deletedMember = await memberDelete(first, addedMemberJson.member.id);
+  assert.equal(deletedMember.status, 200, await deletedMember.clone().text());
+  assert.equal((await deletedMember.json()).membershipId, addedMemberJson.member.id);
+  assert.equal((await memberDelete(first, addedMemberJson.member.id)).status, 404);
+  assert.ok(!(await (await fetch(membersUrl, { headers: headers(first) })).json()).members.some((item) => item.id === addedMemberJson.member.id));
+  const revokedEvent = await db.query('SELECT type,"previousRole","nextRole" FROM "MembershipEvent" WHERE "membershipId"=$1 AND type=\'REVOKED\'', [addedMemberJson.member.id]);
+  assert.deepEqual(revokedEvent.rows[0], { type: "REVOKED", previousRole: "VIEWER", nextRole: null });
   if (process.env.RECEIPT_UI_BROWSER) {
     const { testOrganizationBrowser } = await import("./organization-ui-browser.mjs");
-    await testOrganizationBrowser({ chromePath: process.env.RECEIPT_UI_BROWSER, base, cookie: first.cookie, orgA, orgB });
+    await testOrganizationBrowser({ chromePath: process.env.RECEIPT_UI_BROWSER, base, cookie: first.cookie, orgA, orgB, memberEmail: futureMemberEmail });
     await db.query('DELETE FROM "Product" WHERE "organizationId"=$1 AND code=\'browser-test\'', [orgA]);
   }
   const productUrl = `${base}/api/products`;
@@ -349,6 +404,19 @@ try {
   assert.equal((await select(second, orgB)).status, 403);
   assert.equal((await (await select(second, orgA)).json()).active.organization.id, orgA);
   assert.equal((await (await get(first)).json()).active.organization.id, orgA);
+  const profileUrl = `${base}/api/profile`;
+  assert.equal((await fetch(profileUrl)).status, 401);
+  assert.equal((await (await fetch(profileUrl, { headers: headers(first) })).json()).profile.name, "Test");
+  const updateProfile = await fetch(`${base}/api/auth/update-user`, { method: "POST", headers: headers(first), body: JSON.stringify({ name: "Updated profile" }) });
+  assert.equal(updateProfile.status, 200, await updateProfile.clone().text());
+  assert.equal((await (await fetch(profileUrl, { headers: headers(first) })).json()).profile.name, "Updated profile");
+  const changePassword = (currentPassword, newPassword) => fetch(`${base}/api/auth/change-password`, { method: "POST", headers: headers(first), body: JSON.stringify({ currentPassword, newPassword, revokeOtherSessions: false }) });
+  assert.equal((await changePassword("incorrect-password", "new-password-123")).status, 400);
+  assert.equal((await changePassword(password, "new-password-123")).status, 200);
+  const oldSignIn = await fetch(`${base}/api/auth/sign-in/email`, { method: "POST", headers: { origin: base, "content-type": "application/json" }, body: JSON.stringify({ email, password }) });
+  assert.equal(oldSignIn.status, 401);
+  const newSignIn = await fetch(`${base}/api/auth/sign-in/email`, { method: "POST", headers: { origin: base, "content-type": "application/json" }, body: JSON.stringify({ email, password: "new-password-123" }) });
+  assert.equal(newSignIn.status, 200, await newSignIn.clone().text());
   console.log("Active organization isolated checks passed.");
 } finally {
   if (server && server.exitCode === null) { server.kill(); await new Promise((resolve) => server.once("exit", resolve)); }

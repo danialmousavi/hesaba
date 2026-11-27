@@ -1,4 +1,6 @@
 import { readOrganizationPage } from "@/lib/organization-page";
+import { activeOrganizationTestEnabled } from "@/lib/active-organization";
+import { MembersManager } from "./members-manager";
 
 export const instant = false;
 
@@ -18,6 +20,7 @@ export default async function OrganizationPage() {
         <div><dt className="text-sm text-slate-500">شناسه سازمان</dt><dd className="mt-2 font-semibold" dir="ltr">{membership.organization.slug}</dd></div>
         <div><dt className="text-sm text-slate-500">تاریخ ایجاد</dt><dd className="mt-2 font-semibold">{new Intl.DateTimeFormat("fa-IR", { dateStyle: "long" }).format(membership.organization.createdAt)}</dd></div>
       </dl>
+      {activeOrganizationTestEnabled() && membership.role === "ADMIN" && <MembersManager currentUserId={membership.userId} />}
     </section>
   );
 }
