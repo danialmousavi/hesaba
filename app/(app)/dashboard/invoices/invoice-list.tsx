@@ -1,5 +1,7 @@
 "use client";
 
+import { organizationFetch as fetch } from "@/lib/organization-fetch";
+
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { IssuePreview } from "./issue-preview";

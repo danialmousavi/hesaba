@@ -3,7 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { lockJournalAccounts, markPartyAccountsUsed } from "@/lib/journal-account-locks";
 import { isTransactionConflict } from "@/lib/prisma-errors";
-import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const amount = z.string().regex(/^(0|[1-9]\d{0,19})$/, "مبلغ باید عدد صحیح غیرمنفی و حداکثر ۲۰ رقم باشد.");
 const schema = z.object({
@@ -35,16 +35,19 @@ export async function GET(request: Request) {
   const where: Prisma.JournalEntryWhereInput = { organizationId: membership.organizationId, ...(fiscalYearId && { fiscalYearId }), ...(status && { status }), ...(from || to ? { date: { ...(from && { gte: new Date(`${from}T00:00:00Z`) }), ...(to && { lte: new Date(`${to}T00:00:00Z`) }) } } : {}), ...(q && { OR: [{ description: { contains: q, mode: "insensitive" } }, ...(numericQuery ? [{ number: numericQuery }] : [])] }) };
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, membership);
       if (fiscalYearId && !await tx.fiscalYear.findFirst({ where: { id: fiscalYearId, organizationId: membership.organizationId }, select: { id: true } })) return null;
       const [entries, total] = await Promise.all([
         tx.journalEntry.findMany({ where, orderBy: [{ date: "desc" }, { number: "desc" }, { id: "desc" }], ...(parsed.data.page !== undefined || parsed.data.pageSize !== undefined ? { skip: (page - 1) * pageSize, take: pageSize } : {}), select: { id: true, kind: true, fiscalYearId: true, number: true, date: true, description: true, status: true, reversal: { select: { reversalEntryId: true } }, reversalOf: { select: { sourceEntryId: true } }, invoice: { select: { id: true } }, payment: { select: { id: true } }, financialTransaction: { select: { id: true } }, lines: { select: { id: true, accountId: true, description: true, debit: true, credit: true } } } }),
         tx.journalEntry.count({ where }),
       ]);
-      return { entries, total, ...(parsed.data.page !== undefined || parsed.data.pageSize !== undefined ? { page, pageSize } : {}) };
+      return { entries, total, organizationId: membership.organizationId, ...(parsed.data.page !== undefined || parsed.data.pageSize !== undefined ? { page, pageSize } : {}) };
     }, { isolationLevel: "RepeatableRead" });
     if (!result) return Response.json({ error: "سال مالی پیدا نشد." }, { status: 404 });
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Journal list failed", error);
     return Response.json({ error: "دریافت فهرست اسناد انجام نشد." }, { status: 500 });
   }

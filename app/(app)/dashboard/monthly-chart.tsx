@@ -1,5 +1,7 @@
 "use client";
 
+import { organizationFetch as fetch } from "@/lib/organization-fetch";
+
 import { useEffect, useState } from "react";
 import type { DashboardRange } from "./dashboard-date-filter";
 

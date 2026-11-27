@@ -1,7 +1,4 @@
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { readOrganizationPage } from "@/lib/organization-page";
 import { AccountForm } from "./account-form";
 import { AccountControls } from "./account-controls";
 
@@ -9,11 +6,7 @@ export const instant = false;
 const labels = { ASSET: "دارایی", LIABILITY: "بدهی", EQUITY: "سرمایه", REVENUE: "درآمد", EXPENSE: "هزینه" } as const;
 
 export default async function AccountsPage() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/sign-in");
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true, organization: { select: { name: true } } } });
-  if (!member) redirect("/onboarding");
-  const accounts = await prisma.ledgerAccount.findMany({ where: { organizationId: member.organizationId }, orderBy: { code: "asc" }, select: { id: true, parentId: true, code: true, name: true, type: true, isActive: true } });
+  const { member, data: accounts } = await readOrganizationPage((tx, member) => tx.ledgerAccount.findMany({ where: { organizationId: member.organizationId }, orderBy: { code: "asc" }, select: { id: true, parentId: true, code: true, name: true, type: true, isActive: true } }));
   const renderTree = (parentId: string | null, visited: Set<string>): React.ReactNode => {
     const children = accounts.filter((account) => account.parentId === parentId && !visited.has(account.id));
     if (!children.length) return null;

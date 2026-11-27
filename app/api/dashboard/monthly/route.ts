@@ -1,4 +1,4 @@
-import { organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 import { dashboardDateRange, parseDashboardFilters } from "@/lib/dashboard-date-range";
 
@@ -16,6 +16,7 @@ export async function GET(request: Request) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       const fiscalYear = await tx.fiscalYear.findFirst({
         where: { id: filters.fiscalYearId, organizationId: member.organizationId },
         select: { id: true, name: true, startDate: true, endDate: true },
@@ -51,6 +52,8 @@ export async function GET(request: Request) {
     if ("invalidRange" in result) return Response.json({ error: "بازه باید در محدوده سال مالی باشد." }, { status: 400 });
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Dashboard monthly totals failed", error);
     return Response.json({ error: "دریافت عملکرد ماهانه انجام نشد." }, { status: 500 });
   }

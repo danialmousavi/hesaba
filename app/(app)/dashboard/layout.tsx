@@ -1,9 +1,16 @@
 import Link from "next/link";
 import { SignOutButton } from "./sign-out-button";
+import { activeOrganizationTestEnabled } from "@/lib/active-organization";
+import { OrganizationPicker } from "../organization-picker";
+import { readOrganizationPage } from "@/lib/organization-page";
+import { connection } from "next/server";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  await connection();
+  const enabled = activeOrganizationTestEnabled();
+  const organizationId = enabled ? (await readOrganizationPage(async () => null)).member.organizationId : undefined;
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900" dir="rtl">
+    <div data-active-organization-id={organizationId} className="min-h-screen bg-slate-50 text-slate-900" dir="rtl">
       <div className="flex min-h-screen w-full flex-col md:flex-row print:block print:min-h-0">
         <aside className="border-b border-slate-200 bg-white md:sticky md:top-0 md:h-screen md:w-64 md:shrink-0 md:border-b-0 md:border-l print:hidden">
           <div className="px-6 py-6">
@@ -32,7 +39,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </aside>
         <div className="min-w-0 flex-1">
           <header className="flex min-h-20 items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 sm:px-8 print:hidden">
-            <div><p className="text-xs text-slate-500">فضای کاری</p><p className="mt-1 font-modam text-lg font-bold">حسابا</p></div>
+            <div><p className="text-xs text-slate-500">فضای کاری</p><p className="mt-1 font-modam text-lg font-bold">حسابا</p>{enabled && <OrganizationPicker />}</div>
             <SignOutButton />
           </header>
           <main className="w-full px-5 py-8 sm:px-8 sm:py-10 print:p-0">{children}</main>

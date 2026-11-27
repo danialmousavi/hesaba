@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createProductSchema, productFields } from "@/lib/product-validation";
-import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { isTransactionConflict } from "@/lib/prisma-errors";
 
 const querySchema = z.object({
@@ -26,12 +26,17 @@ export async function GET(request: Request) {
     ...(search ? { OR: [{ name: { contains: search, mode: "insensitive" } }, { code: { contains: search, mode: "insensitive" } }] } : {}),
   };
   try {
-    const [products, total] = await prisma.$transaction([
-      prisma.product.findMany({ where, select: productFields, orderBy: [{ name: "asc" }, { id: "asc" }], skip: (page - 1) * pageSize, take: pageSize }),
-      prisma.product.count({ where }),
-    ], { isolationLevel: "RepeatableRead" });
+    const [products, total] = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
+      return Promise.all([
+        tx.product.findMany({ where, select: productFields, orderBy: [{ name: "asc" }, { id: "asc" }], skip: (page - 1) * pageSize, take: pageSize }),
+        tx.product.count({ where }),
+      ]);
+    }, { isolationLevel: "RepeatableRead" });
     return Response.json({ products, total, page, pageSize }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Product list failed", error);
     return Response.json({ error: "دریافت فهرست کالا و خدمات انجام نشد." }, { status: 500 });
   }

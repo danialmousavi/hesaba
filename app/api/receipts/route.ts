@@ -6,7 +6,7 @@ import { lockJournalAccounts, markPartyAccountsUsed } from "@/lib/journal-accoun
 import { prisma } from "@/lib/prisma";
 import { isTransactionConflict } from "@/lib/prisma-errors";
 import { receiptFields, serializeReceipt } from "@/lib/receipt-api";
-import { guardOrganizationWrite, OrganizationContextError, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, OrganizationContextError, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const positiveAmount = z.string().regex(/^[1-9]\d{0,19}$/);
 const schema = z.strictObject({
@@ -26,12 +26,17 @@ export async function GET(request: Request) {
   try {
     const { page, pageSize } = query.data;
     const where = { organizationId: member.organizationId, type: "RECEIPT" as const, status: "POSTED" as const };
-    const [receipts, total] = await prisma.$transaction([
-      prisma.payment.findMany({ where, select: receiptFields, orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * pageSize, take: pageSize }),
-      prisma.payment.count({ where }),
-    ], { isolationLevel: "RepeatableRead" });
+    const [receipts, total] = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
+      return Promise.all([
+        tx.payment.findMany({ where, select: receiptFields, orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * pageSize, take: pageSize }),
+        tx.payment.count({ where }),
+      ]);
+    }, { isolationLevel: "RepeatableRead" });
     return Response.json({ receipts: receipts.map(serializeReceipt), total, page, pageSize }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Receipt list failed", error);
     return Response.json({ error: "دریافت فهرست دریافت‌ها انجام نشد." }, { status: 500 });
   }

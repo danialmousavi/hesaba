@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isTransactionConflict } from "@/lib/prisma-errors";
-import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const inputSchema = z.strictObject({ purpose: z.enum(["RECEIVABLE", "PAYABLE"]), accountId: z.string().cuid().nullable() });
 const idSchema = z.string().cuid();
@@ -13,10 +13,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const id = idSchema.safeParse((await params).id);
   if (!id.success) return Response.json({ error: "شناسه شخص معتبر نیست." }, { status: 400 });
   try {
-    const party = await prisma.party.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: { accountLinks: { select: { purpose: true, firstUsedAt: true, account: { select: { id: true, code: true, name: true, type: true, isActive: true } } }, orderBy: { purpose: "asc" } } } });
+    const party = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
+      return tx.party.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: { accountLinks: { select: { purpose: true, firstUsedAt: true, account: { select: { id: true, code: true, name: true, type: true, isActive: true } } }, orderBy: { purpose: "asc" } } } });
+    }, { isolationLevel: "RepeatableRead" });
     if (!party) return Response.json({ error: "شخص پیدا نشد." }, { status: 404 });
     return Response.json({ links: party.accountLinks }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Party account list failed", error);
     return Response.json({ error: "دریافت حساب‌های شخص انجام نشد." }, { status: 500 });
   }

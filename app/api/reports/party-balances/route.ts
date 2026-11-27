@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
-import { organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 const querySchema = z.strictObject({
@@ -20,6 +20,7 @@ export async function GET(request: Request) {
   const { fiscalYearId, search, role, status, page, pageSize } = parsed.data;
   try {
     const report = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       const year = await tx.fiscalYear.findFirst({ where: { id: fiscalYearId, organizationId: member.organizationId }, select: { id: true, name: true, startDate: true, endDate: true, status: true } });
       if (!year) return null;
       const where: Prisma.PartyWhereInput = {
@@ -51,6 +52,8 @@ export async function GET(request: Request) {
     if (!report) return Response.json({ error: "سال مالی پیدا نشد." }, { status: 404 });
     return Response.json(report, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Party balances report failed", error);
     return Response.json({ error: "دریافت گزارش مانده اشخاص انجام نشد." }, { status: 500 });
   }

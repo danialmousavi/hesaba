@@ -3,7 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { lockJournalAccounts, markPartyAccountsUsed } from "@/lib/journal-account-locks";
 import { isTransactionConflict } from "@/lib/prisma-errors";
-import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const amount = z.string().regex(/^(0|[1-9]\d{0,19})$/);
 const schema = z.object({
@@ -19,11 +19,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   if (!z.string().cuid().safeParse(id).success) return Response.json({ error: "شناسه سند معتبر نیست." }, { status: 400 });
   try {
-    const entry = await prisma.journalEntry.findFirst({ where: { id, organizationId: member.organizationId }, select: { id: true, number: true, date: true, description: true, status: true, kind: true, createdAt: true, updatedAt: true, fiscalYear: { select: { id: true, name: true, status: true } }, lines: { orderBy: { id: "asc" }, select: { id: true, description: true, debit: true, credit: true, account: { select: { id: true, code: true, name: true, type: true } } } }, reversal: { select: { reversalEntryId: true } }, reversalOf: { select: { sourceEntryId: true } }, invoice: { select: { id: true, number: true } }, payment: { select: { id: true } }, financialTransaction: { select: { id: true } } } });
+    const entry = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
+      return tx.journalEntry.findFirst({ where: { id, organizationId: member.organizationId }, select: { id: true, number: true, date: true, description: true, status: true, kind: true, createdAt: true, updatedAt: true, fiscalYear: { select: { id: true, name: true, status: true } }, lines: { orderBy: { id: "asc" }, select: { id: true, description: true, debit: true, credit: true, account: { select: { id: true, code: true, name: true, type: true } } } }, reversal: { select: { reversalEntryId: true } }, reversalOf: { select: { sourceEntryId: true } }, invoice: { select: { id: true, number: true } }, payment: { select: { id: true } }, financialTransaction: { select: { id: true } } } });
+    }, { isolationLevel: "RepeatableRead" });
     if (!entry) return Response.json({ error: "سند پیدا نشد." }, { status: 404 });
     const totals = entry.lines.reduce((sum, line) => ({ debit: sum.debit + BigInt(line.debit.toFixed(0)), credit: sum.credit + BigInt(line.credit.toFixed(0)) }), { debit: 0n, credit: 0n });
     return Response.json({ entry, totals: { debit: totals.debit.toString(), credit: totals.credit.toString() } }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Journal detail failed", error);
     return Response.json({ error: "دریافت جزئیات سند انجام نشد." }, { status: 500 });
   }

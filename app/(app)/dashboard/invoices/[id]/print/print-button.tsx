@@ -1,5 +1,7 @@
 "use client";
 
+import { organizationFetch as fetch } from "@/lib/organization-fetch";
+
 import { useRef, useState } from "react";
 
 export function PrintButton() {

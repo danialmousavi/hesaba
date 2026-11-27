@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(request: Request) {
@@ -9,6 +9,7 @@ export async function GET(request: Request) {
   if (!parsed.success) return Response.json({ error: "سال مالی معتبر انتخاب کنید." }, { status: 400 });
   try {
     const report = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       const year = await tx.fiscalYear.findFirst({ where: { id: parsed.data, organizationId: member.organizationId }, select: { id: true, name: true, startDate: true, endDate: true, status: true } });
       if (!year) return null;
       const totals = await tx.journalLine.groupBy({ by: ["accountId"], where: { organizationId: member.organizationId, entry: { organizationId: member.organizationId, fiscalYearId: year.id, status: "POSTED", kind: { not: "CLOSING_TEMPORARY" } }, account: { organizationId: member.organizationId, type: { in: ["REVENUE", "EXPENSE"] } } }, _sum: { debit: true, credit: true } });
@@ -28,6 +29,8 @@ export async function GET(request: Request) {
     if (!report) return Response.json({ error: "سال مالی پیدا نشد." }, { status: 404 });
     return Response.json(report, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Profit and loss report failed", error);
     return Response.json({ error: "دریافت سود و زیان انجام نشد." }, { status: 500 });
   }

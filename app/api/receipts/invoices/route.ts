@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { calculateInvoice } from "@/lib/invoice-calculation";
-import { organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 const querySchema = z.strictObject({
@@ -16,6 +16,7 @@ export async function GET(request: Request) {
   const { partyId, page, pageSize } = parsed.data;
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       if (!await tx.party.findFirst({ where: { id: partyId, organizationId: member.organizationId, isCustomer: true }, select: { id: true } })) return null;
       const where = { organizationId: member.organizationId, customerId: partyId, status: "ISSUED" as const };
       const [invoices, total] = await Promise.all([
@@ -32,6 +33,8 @@ export async function GET(request: Request) {
     if (!result) return Response.json({ error: "مشتری پیدا نشد." }, { status: 404 });
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Receipt invoices failed", error);
     return Response.json({ error: "دریافت مانده فاکتورها انجام نشد." }, { status: 500 });
   }

@@ -6,7 +6,7 @@ import type { ClosingLine } from "@/lib/fiscal-close-calculation";
 import { lockJournalAccounts, markPartyAccountsUsed } from "@/lib/journal-account-locks";
 import { prisma } from "@/lib/prisma";
 import { isTransactionConflict } from "@/lib/prisma-errors";
-import { guardOrganizationWrite, OrganizationContextError, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, OrganizationContextError, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const schema = closingInputSchema.extend({ requestKey: z.uuid().transform((value) => value.toLowerCase()), previewFingerprint: z.string().regex(/^[0-9a-f]{64}$/) });
 
@@ -15,9 +15,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
   const id = z.string().cuid().safeParse((await params).id);
   if (!id.success) return Response.json({ error: "سال مالی معتبر نیست." }, { status: 400 });
-  const closing = await prisma.fiscalClosing.findUnique({ where: { organizationId_sourceYearId: { organizationId: member.organizationId, sourceYearId: id.data } }, select: { summary: true, actorName: true, createdAt: true } });
-  if (!closing) return Response.json({ error: "عملیات اختتامیه پیدا نشد." }, { status: 404 });
-  return Response.json({ closing: closing.summary, actorName: closing.actorName, createdAt: closing.createdAt }, { headers: { "Cache-Control": "no-store" } });
+  try {
+    const closing = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
+      return tx.fiscalClosing.findUnique({ where: { organizationId_sourceYearId: { organizationId: member.organizationId, sourceYearId: id.data } }, select: { summary: true, actorName: true, createdAt: true } });
+    }, { isolationLevel: "RepeatableRead" });
+    if (!closing) return Response.json({ error: "عملیات اختتامیه پیدا نشد." }, { status: 404 });
+    return Response.json({ closing: closing.summary, actorName: closing.actorName, createdAt: closing.createdAt }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return organizationContextError(error) ?? Response.json({ error: "دریافت اختتامیه انجام نشد." }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {

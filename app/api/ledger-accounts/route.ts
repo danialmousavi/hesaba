@@ -1,7 +1,7 @@
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { isTransactionConflict } from "@/lib/prisma-errors";
 
 const inputSchema = z.object({
@@ -14,12 +14,15 @@ const inputSchema = z.object({
 export async function GET(request: Request) {
   const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
   if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
-  const accounts = await prisma.ledgerAccount.findMany({
-    where: { organizationId: member.organizationId },
-    orderBy: { code: "asc" },
-    select: { id: true, parentId: true, code: true, name: true, type: true, isActive: true },
-  });
-  return Response.json({ accounts }, { headers: { "Cache-Control": "no-store" } });
+  try {
+    const accounts = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
+      return tx.ledgerAccount.findMany({ where: { organizationId: member.organizationId }, orderBy: { code: "asc" }, select: { id: true, parentId: true, code: true, name: true, type: true, isActive: true } });
+    }, { isolationLevel: "RepeatableRead" });
+    return Response.json({ accounts }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return organizationContextError(error) ?? Response.json({ error: "دریافت حساب‌ها انجام نشد." }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {

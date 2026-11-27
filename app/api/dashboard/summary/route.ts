@@ -1,4 +1,4 @@
-import { organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 import { dashboardDateRange, parseDashboardFilters } from "@/lib/dashboard-date-range";
 
@@ -9,6 +9,7 @@ export async function GET(request: Request) {
   if (!filters) return Response.json({ error: "سال مالی و بازه زمانی معتبر انتخاب کنید." }, { status: 400 });
   try {
     const summary = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       const year = await tx.fiscalYear.findFirst({ where: { id: filters.fiscalYearId, organizationId: member.organizationId }, select: { id: true, name: true, startDate: true, endDate: true, status: true } });
       if (!year) return null;
       const range = dashboardDateRange(filters, year);
@@ -29,6 +30,8 @@ export async function GET(request: Request) {
     if ("invalidRange" in summary) return Response.json({ error: "بازه باید در محدوده سال مالی باشد." }, { status: 400 });
     return Response.json(summary, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Dashboard summary failed", error);
     return Response.json({ error: "دریافت خلاصهٔ داشبورد انجام نشد." }, { status: 500 });
   }

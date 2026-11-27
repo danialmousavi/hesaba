@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(request: Request) {
@@ -10,6 +10,7 @@ export async function GET(request: Request) {
   if (!params.success) return Response.json({ error: "سال مالی و حساب معتبر انتخاب کنید." }, { status: 400 });
   try {
     const report = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       const [year, account] = await Promise.all([
         tx.fiscalYear.findFirst({ where: { id: params.data.fiscalYearId, organizationId: member.organizationId }, select: { id: true, name: true, startDate: true, endDate: true, status: true } }),
         tx.ledgerAccount.findFirst({ where: { id: params.data.accountId, organizationId: member.organizationId }, select: { id: true, name: true, code: true, type: true, isActive: true } }),
@@ -28,6 +29,8 @@ export async function GET(request: Request) {
     if (!report) return Response.json({ error: "حساب یا سال مالی پیدا نشد." }, { status: 404 });
     return Response.json(report, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("General ledger report failed", error);
     return Response.json({ error: "دریافت دفتر کل انجام نشد." }, { status: 500 });
   }

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { lockFinancialAccounts } from "@/lib/financial-accounts";
 import { isTransactionConflict } from "@/lib/prisma-errors";
 import { financialTransactionInput } from "@/lib/financial-transaction-input";
-import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const querySchema = z.object({
   fiscalYearId: z.string().cuid().optional(),
@@ -24,6 +24,7 @@ export async function GET(request: Request) {
   const { fiscalYearId, type, search, page, pageSize } = parsed.data;
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       if (fiscalYearId && !await tx.fiscalYear.findFirst({ where: { id: fiscalYearId, organizationId: member.organizationId }, select: { id: true } })) return null;
       const where: Prisma.FinancialTransactionWhereInput = { organizationId: member.organizationId, status: "DRAFT", ...(fiscalYearId ? { fiscalYearId } : {}), ...(type === "all" ? {} : { type: type === "income" ? "INCOME" : "EXPENSE" }), ...(search ? { description: { contains: search, mode: "insensitive" } } : {}) };
       const [transactions, total] = await Promise.all([
@@ -35,6 +36,8 @@ export async function GET(request: Request) {
     if (!result) return Response.json({ error: "سال مالی پیدا نشد." }, { status: 404 });
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Financial draft list failed", error);
     return Response.json({ error: "دریافت پیش‌نویس‌های درآمد و هزینه انجام نشد." }, { status: 500 });
   }

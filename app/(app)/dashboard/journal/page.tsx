@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { readOrganizationPage } from "@/lib/organization-page";
+import { OrganizationContextError } from "@/lib/organization-context";
 import { JournalForm } from "./journal-form";
 import { PostJournalButton } from "./post-journal-button";
 import { DeleteDraftButton } from "./delete-draft-button";
@@ -15,23 +14,23 @@ export const instant = false;
 
 export default async function JournalPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const requestHeaders = await headers();
-  const session = await auth.api.getSession({ headers: requestHeaders });
-  if (!session) redirect("/sign-in");
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true, organization: { select: { name: true } } } });
-  if (!member) redirect("/onboarding");
   const search = await searchParams;
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(search)) if (key !== "focus" && key !== "pageSize" && value !== undefined) for (const part of Array.isArray(value) ? value : [value]) params.append(key, part);
   params.set("pageSize", "15");
-  const [allYears, accounts, listResponse] = await Promise.all([
-    prisma.fiscalYear.findMany({ where: { organizationId: member.organizationId }, orderBy: { startDate: "desc" }, select: { id: true, name: true, status: true, startDate: true, endDate: true } }),
-    prisma.ledgerAccount.findMany({ where: { organizationId: member.organizationId, isActive: true }, orderBy: { code: "asc" }, select: { id: true, name: true, code: true } }),
-    getJournals(new Request(`http://localhost/api/journal-entries?${params}`, { headers: requestHeaders })),
-  ]);
-  const list = await listResponse.json() as { entries?: { id: string }[]; total?: number; page?: number; error?: string };
+  const listResponse = await getJournals(new Request(`http://localhost/api/journal-entries?${params}`, { headers: requestHeaders }));
+  const list = await listResponse.json() as { entries?: { id: string }[]; total?: number; page?: number; organizationId?: string; error?: string };
   const focus = typeof search.focus === "string" && /^c[a-z0-9]{1,100}$/i.test(search.focus) ? search.focus : null;
   const ids = [...new Set([...(focus ? [focus] : []), ...(list.entries ?? []).map((item) => item.id)])];
-  const fetched = await prisma.journalEntry.findMany({ where: { organizationId: member.organizationId, id: { in: ids } }, select: { id: true, kind: true, number: true, date: true, description: true, status: true, fiscalYear: { select: { name: true, status: true } }, reversal: { select: { reversal: { select: { id: true, number: true, status: true, fiscalYear: { select: { name: true } } } } } }, reversalOf: { select: { source: { select: { id: true, number: true, fiscalYear: { select: { name: true } } } } } }, invoice: { select: { id: true } }, payment: { select: { id: true } }, financialTransaction: { select: { id: true } }, lines: { select: { id: true, debit: true, credit: true, description: true, account: { select: { name: true, code: true } } } } } });
+  const { member, data: { allYears, accounts, fetched } } = await readOrganizationPage(async (tx, member) => {
+    if (list.organizationId && list.organizationId !== member.organizationId) throw new OrganizationContextError(409, "سازمان تغییر کرده است.");
+    const [allYears, accounts, fetched] = await Promise.all([
+      tx.fiscalYear.findMany({ where: { organizationId: member.organizationId }, orderBy: { startDate: "desc" }, select: { id: true, name: true, status: true, startDate: true, endDate: true } }),
+      tx.ledgerAccount.findMany({ where: { organizationId: member.organizationId, isActive: true }, orderBy: { code: "asc" }, select: { id: true, name: true, code: true } }),
+      tx.journalEntry.findMany({ where: { organizationId: member.organizationId, id: { in: ids } }, select: { id: true, kind: true, number: true, date: true, description: true, status: true, fiscalYear: { select: { name: true, status: true } }, reversal: { select: { reversal: { select: { id: true, number: true, status: true, fiscalYear: { select: { name: true } } } } } }, reversalOf: { select: { source: { select: { id: true, number: true, fiscalYear: { select: { name: true } } } } } }, invoice: { select: { id: true } }, payment: { select: { id: true } }, financialTransaction: { select: { id: true } }, lines: { select: { id: true, debit: true, credit: true, description: true, account: { select: { name: true, code: true } } } } } }),
+    ]);
+    return { allYears, accounts, fetched };
+  });
   const entries = ids.flatMap((id) => fetched.filter((entry) => entry.id === id));
   const years = allYears.filter((item) => item.status === "OPEN");
   const year = years[0];

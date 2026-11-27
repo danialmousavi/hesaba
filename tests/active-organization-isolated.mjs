@@ -54,11 +54,21 @@ try {
   await db.query('INSERT INTO "Membership" (id,"userId","organizationId",role,"updatedAt") VALUES ($1,$2,$3,\'VIEWER\',now())', [id(), first.user.id, orgB]);
   const second = await authenticate("sign-in");
   assert.equal((await (await get(second)).json()).state, "SELECTION_REQUIRED");
+  const pendingSelection = await fetch(`${base}/dashboard`, { headers: headers(second), redirect: "manual" });
+  const pendingHtml = await pendingSelection.text();
+  if (pendingSelection.status === 307) assert.match(pendingSelection.headers.get("location"), /select-organization/);
+  else { assert.equal(pendingSelection.status, 200); assert.match(pendingHtml, /NEXT_REDIRECT.*select-organization|select-organization.*NEXT_REDIRECT/); }
+  assert.ok(!pendingHtml.includes(orgA) && !pendingHtml.includes(orgB));
   assert.equal((await select(second, forbidden)).status, 403);
   assert.equal((await select(second, orgB, "http://invalid.example")).status, 403);
   assert.equal((await select(second, "invalid")).status, 400);
   assert.equal((await (await select(second, orgB)).json()).active.role, "VIEWER");
   assert.equal((await (await get(first)).json()).active.organization.id, orgA);
+  if (process.env.RECEIPT_UI_BROWSER) {
+    const { testOrganizationBrowser } = await import("./organization-ui-browser.mjs");
+    await testOrganizationBrowser({ chromePath: process.env.RECEIPT_UI_BROWSER, base, cookie: first.cookie, orgA, orgB });
+    await db.query('DELETE FROM "Product" WHERE "organizationId"=$1 AND code=\'browser-test\'', [orgA]);
+  }
   const productUrl = `${base}/api/products`;
   const productBody = { code: "isolated-a", name: "A product", type: "GOODS", unit: "عدد", salePrice: "10" };
   const productPost = (user, expected, body = productBody) => fetch(productUrl, { method: "POST", headers: { ...headers(user), "x-expected-organization-id": expected }, body: JSON.stringify(body) });
@@ -84,6 +94,15 @@ try {
   assert.ok(!(await (await fetch(accountsUrl, { headers: headers(second) })).json()).accounts.some((account) => account.id === ledgerId));
   const yearA = id(), yearB = id();
   for (const [year, org] of [[yearA, orgA], [yearB, orgB]]) await db.query('INSERT INTO "FiscalYear" (id,"organizationId",name,"startDate","endDate","updatedAt") VALUES ($1,$2,$1,\'2026-01-01\',\'2026-12-31\',now())', [year, org]);
+  for (const path of ["/dashboard", "/dashboard/organization", "/dashboard/accounts", "/dashboard/parties", "/dashboard/products", "/dashboard/fiscal-years", "/dashboard/journal", "/dashboard/invoices", "/dashboard/transactions", "/dashboard/receipts", "/dashboard/supplier-payments", "/dashboard/reports/trial-balance", "/dashboard/reports/general-ledger", "/dashboard/reports/profit-loss", "/dashboard/reports/party-balances", "/dashboard/reports/sales"]) {
+    const ownPage = await fetch(`${base}${path}`, { headers: headers(first) });
+    assert.equal(ownPage.status, 200, path); const ownHtml = await ownPage.text();
+    const otherPage = await fetch(`${base}${path}`, { headers: headers(second) });
+    assert.equal(otherPage.status, 200, path); const otherHtml = await otherPage.text();
+    assert.ok(ownHtml.includes(orgA), `Missing selected organization in ${path}`);
+    assert.ok(otherHtml.includes(orgB), `Missing other organization in ${path}`);
+    assert.ok(!otherHtml.includes("Account test") && !otherHtml.includes("Party A") && !otherHtml.includes("A product"), `Cross-organization data in ${path}`);
+  }
   for (const path of ["reports/trial-balance", "reports/trial-balance/csv", "reports/profit-loss", "reports/profit-loss/csv", "reports/sales", "reports/party-balances", "dashboard/summary", "dashboard/monthly", "dashboard/sales", "dashboard/balances", "transactions/posted"]) {
     const own = await fetch(`${base}/api/${path}?fiscalYearId=${yearA}`, { headers: headers(first) });
     assert.equal(own.status, 200, `${path}: ${await own.clone().text()}`);
@@ -105,6 +124,8 @@ try {
   const createdJournal = await fetch(journalUrl, { method: "POST", headers: journalHeaders, body: JSON.stringify(journalBody) });
   assert.equal(createdJournal.status, 201, await createdJournal.clone().text());
   const journalId = (await createdJournal.json()).entry.id;
+  const editOther = await fetch(`${base}/dashboard/journal/${journalId}/edit`, { headers: headers(second), redirect: "manual" });
+  assert.ok(!((await editOther.text()).includes("Journal A")));
   assert.equal((await fetch(`${journalUrl}/${journalId}`, { headers: headers(first) })).status, 200);
   assert.equal((await fetch(`${journalUrl}/${journalId}`, { headers: headers(second) })).status, 404);
   assert.equal((await fetch(`${journalUrl}?fiscalYearId=${yearA}`, { headers: headers(second) })).status, 404);
@@ -139,6 +160,9 @@ try {
   const createdInvoice = await fetch(invoiceUrl, { method: "POST", headers: journalHeaders, body: JSON.stringify(invoiceBody) });
   assert.equal(createdInvoice.status, 201, await createdInvoice.clone().text());
   const invoice = (await createdInvoice.json()).invoice;
+  const foreignPrint = await fetch(`${base}/dashboard/invoices/${invoice.id}/print`, { headers: headers(second) });
+  const foreignPrintHtml = await foreignPrint.text();
+  assert.ok([200, 404].includes(foreignPrint.status) && !foreignPrintHtml.includes("Invoice A"));
   assert.equal((await fetch(`${invoiceUrl}/${invoice.id}`, { headers: headers(second) })).status, 404);
   assert.equal((await fetch(`${invoiceUrl}/${invoice.id}/pdf`, { headers: headers(second) })).status, 404);
   assert.equal((await fetch(`${invoiceUrl}?fiscalYearId=${yearA}`, { headers: headers(second) })).status, 404);
@@ -296,8 +320,32 @@ try {
   assert.ok(concurrent.some((item) => item.status === 200));
   const selected = await (await get(second)).json(); assert.ok([orgA, orgB].includes(selected.active.organization.id));
   assert.equal((await select(second, orgB)).status, 200);
+  await db.query("BEGIN");
+  await db.query('SELECT id FROM "Membership" WHERE "userId"=$1 AND "organizationId"=$2 FOR UPDATE', [first.user.id, orgB]);
+  const pendingRoleRead = fetch(productUrl, { headers: headers(second) });
+  let blocked = false;
+  for (let i = 0; i < 120 && !blocked; i++) { blocked = (await db.query('SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))) AS blocked', [db.processID])).rows[0].blocked; if (!blocked) await new Promise((resolve) => setTimeout(resolve, 100)); }
+  assert.ok(blocked, "Read must wait while role change is being committed");
+  await db.query('UPDATE "Membership" SET role=\'VIEWER\' WHERE "userId"=$1 AND "organizationId"=$2', [first.user.id, orgB]);
+  await db.query("COMMIT");
+  assert.equal((await pendingRoleRead).status, 409);
+  assert.equal((await (await get(second)).json()).active.role, "VIEWER");
+  await db.query("BEGIN");
+  await db.query('SELECT id FROM "Membership" WHERE "userId"=$1 AND "organizationId"=$2 FOR UPDATE', [first.user.id, orgB]);
+  const pendingRead = fetch(productUrl, { headers: headers(second) });
+  blocked = false;
+  for (let i = 0; i < 120 && !blocked; i++) { blocked = (await db.query('SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))) AS blocked', [db.processID])).rows[0].blocked; if (!blocked) await new Promise((resolve) => setTimeout(resolve, 100)); }
+  assert.ok(blocked, "Read must wait while membership revocation is being committed");
   await db.query('DELETE FROM "Membership" WHERE "userId"=$1 AND "organizationId"=$2', [first.user.id, orgB]);
+  await db.query("COMMIT");
+  const deniedRead = await pendingRead;
+  assert.ok([403, 409].includes(deniedRead.status), `Read after membership deletion: ${deniedRead.status}`);
   const revoked = await (await get(second)).json(); assert.equal(revoked.state, "MEMBERSHIP_REVOKED"); assert.equal(revoked.active, null);
+  const revokedPage = await fetch(`${base}/dashboard/accounts`, { headers: headers(second), redirect: "manual" });
+  const revokedHtml = await revokedPage.text();
+  if (revokedPage.status === 307) assert.match(revokedPage.headers.get("location"), /select-organization/);
+  else { assert.equal(revokedPage.status, 200); assert.match(revokedHtml, /NEXT_REDIRECT.*select-organization|select-organization.*NEXT_REDIRECT/); }
+  assert.ok(!revokedHtml.includes("Account test") && !revokedHtml.includes("Account A"));
   assert.equal((await select(second, orgB)).status, 403);
   assert.equal((await (await select(second, orgA)).json()).active.organization.id, orgA);
   assert.equal((await (await get(first)).json()).active.organization.id, orgA);

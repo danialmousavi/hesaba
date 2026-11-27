@@ -1,6 +1,6 @@
 import { Prisma } from "@/generated/prisma/client";
 import { z } from "zod";
-import { organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 const dateSchema = z.iso.date().refine((value) => {
@@ -28,6 +28,7 @@ export async function GET(request: Request) {
   const { fiscalYearId, customerId, page, pageSize, paymentStatus } = parsed.data;
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       const year = await tx.fiscalYear.findFirst({ where: { id: fiscalYearId, organizationId: member.organizationId }, select: { id: true, name: true, startDate: true, endDate: true, status: true } });
       if (!year) return { error: "سال مالی پیدا نشد.", status: 404 } as const;
       if (customerId && !await tx.party.findFirst({ where: { id: customerId, organizationId: member.organizationId, isCustomer: true }, select: { id: true } })) return { error: "مشتری پیدا نشد.", status: 404 } as const;
@@ -76,6 +77,8 @@ export async function GET(request: Request) {
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Sales report failed", error);
     return Response.json({ error: "دریافت گزارش فروش انجام نشد." }, { status: 500 });
   }

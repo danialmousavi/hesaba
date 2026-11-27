@@ -1,21 +1,11 @@
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { readOrganizationPage } from "@/lib/organization-page";
 
 export const instant = false;
 
 const roles = { ADMIN: "مدیر", ACCOUNTANT: "حسابدار", VIEWER: "مشاهده‌گر" } as const;
 
 export default async function OrganizationPage() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/sign-in");
-  const membership = await prisma.membership.findFirst({
-    where: { userId: session.user.id },
-    orderBy: { createdAt: "asc" },
-    select: { role: true, organization: { select: { name: true, slug: true, createdAt: true } } },
-  });
-  if (!membership) redirect("/onboarding");
+  const { member: membership } = await readOrganizationPage(async () => null);
 
   return (
     <section>

@@ -4,7 +4,7 @@ import { invoiceFields, invoiceInputSchema, serializeInvoice } from "@/lib/invoi
 import { calculateInvoice, InvoiceCalculationError } from "@/lib/invoice-calculation";
 import { prisma } from "@/lib/prisma";
 import { isTransactionConflict } from "@/lib/prisma-errors";
-import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const querySchema = z.strictObject({
   fiscalYearId: z.string().cuid().optional(),
@@ -21,6 +21,7 @@ export async function GET(request: Request) {
   const { fiscalYearId, status, page, pageSize } = parsed.data;
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       if (fiscalYearId && !await tx.fiscalYear.findFirst({ where: { id: fiscalYearId, organizationId: member.organizationId }, select: { id: true } })) return null;
       const where: Prisma.InvoiceWhereInput = { organizationId: member.organizationId, ...(status === "all" ? {} : { status: status === "draft" ? "DRAFT" : status === "issued" ? "ISSUED" : "CANCELLED" }), ...(fiscalYearId ? { fiscalYearId } : {}) };
       const [invoices, total] = await Promise.all([
@@ -32,6 +33,8 @@ export async function GET(request: Request) {
     if (!result) return Response.json({ error: "سال مالی پیدا نشد." }, { status: 404 });
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Invoice list failed", error);
     return Response.json({ error: "دریافت فهرست فاکتورها انجام نشد." }, { status: 500 });
   }

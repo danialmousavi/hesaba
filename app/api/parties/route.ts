@@ -2,7 +2,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { createPartySchema, partyFields } from "@/lib/party-validation";
-import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { isTransactionConflict } from "@/lib/prisma-errors";
 
 const querySchema = z.object({
@@ -27,12 +27,17 @@ export async function GET(request: Request) {
     ...(search ? { OR: [{ name: { contains: search, mode: "insensitive" } }, { phone: { contains: search, mode: "insensitive" } }, { email: { contains: search, mode: "insensitive" } }] } : {}),
   };
   try {
-    const [parties, total] = await prisma.$transaction([
-      prisma.party.findMany({ where, select: partyFields, orderBy: [{ name: "asc" }, { id: "asc" }], skip: (page - 1) * pageSize, take: pageSize }),
-      prisma.party.count({ where }),
-    ], { isolationLevel: "RepeatableRead" });
+    const [parties, total] = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
+      return Promise.all([
+        tx.party.findMany({ where, select: partyFields, orderBy: [{ name: "asc" }, { id: "asc" }], skip: (page - 1) * pageSize, take: pageSize }),
+        tx.party.count({ where }),
+      ]);
+    }, { isolationLevel: "RepeatableRead" });
     return Response.json({ parties, total, page, pageSize }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Party list failed", error);
     return Response.json({ error: "دریافت فهرست اشخاص انجام نشد." }, { status: 500 });
   }

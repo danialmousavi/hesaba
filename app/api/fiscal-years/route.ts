@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
-import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { isTransactionConflict } from "@/lib/prisma-errors";
 
 const date = z.iso.date().refine((value) => {
@@ -19,12 +19,15 @@ const inputSchema = z.object({
 export async function GET(request: Request) {
   const member = await organizationContext(request).catch((error: unknown) => error instanceof Error ? error : new Error("Organization resolution failed"));
   if (member instanceof Error) return organizationContextError(member) ?? Response.json({ error: "دریافت سازمان انجام نشد." }, { status: 500 });
-  const years = await prisma.fiscalYear.findMany({
-    where: { organizationId: member.organizationId },
-    orderBy: { startDate: "desc" },
-    select: { id: true, name: true, startDate: true, endDate: true, status: true },
-  });
-  return Response.json({ years }, { headers: { "Cache-Control": "no-store" } });
+  try {
+    const years = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
+      return tx.fiscalYear.findMany({ where: { organizationId: member.organizationId }, orderBy: { startDate: "desc" }, select: { id: true, name: true, startDate: true, endDate: true, status: true } });
+    }, { isolationLevel: "RepeatableRead" });
+    return Response.json({ years }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return organizationContextError(error) ?? Response.json({ error: "دریافت سال‌های مالی انجام نشد." }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {

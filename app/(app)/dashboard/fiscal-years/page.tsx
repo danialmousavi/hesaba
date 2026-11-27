@@ -1,7 +1,4 @@
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { readOrganizationPage } from "@/lib/organization-page";
 import { FiscalYearForm } from "./year-form";
 import { CloseYearButton } from "./close-year-button";
 import { ClosingPanel, ClosingResult } from "./closing-panel";
@@ -9,14 +6,10 @@ import { ClosingPanel, ClosingResult } from "./closing-panel";
 export const instant = false;
 
 export default async function FiscalYearsPage() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/sign-in");
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, role: true, organization: { select: { name: true } } } });
-  if (!member) redirect("/onboarding");
-  const [years, equityAccounts] = await Promise.all([
-    prisma.fiscalYear.findMany({ where: { organizationId: member.organizationId }, orderBy: { startDate: "desc" }, include: { closingSource: { select: { id: true, summary: true, targetYear: { select: { id: true, name: true } }, temporaryEntry: { select: { id: true, number: true } }, permanentEntry: { select: { id: true, number: true } }, openingEntry: { select: { id: true, number: true } } } } } }),
-    member.role === "ADMIN" ? prisma.ledgerAccount.findMany({ where: { organizationId: member.organizationId, type: "EQUITY", isActive: true, children: { none: {} }, partyLinks: { none: {} } }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true } }) : Promise.resolve([]),
-  ]);
+  const { member, data: [years, equityAccounts] } = await readOrganizationPage((tx, member) => Promise.all([
+    tx.fiscalYear.findMany({ where: { organizationId: member.organizationId }, orderBy: { startDate: "desc" }, include: { closingSource: { select: { id: true, summary: true, targetYear: { select: { id: true, name: true } }, temporaryEntry: { select: { id: true, number: true } }, permanentEntry: { select: { id: true, number: true } }, openingEntry: { select: { id: true, number: true } } } } } }),
+    member.role === "ADMIN" ? tx.ledgerAccount.findMany({ where: { organizationId: member.organizationId, type: "EQUITY", isActive: true, children: { none: {} }, partyLinks: { none: {} } }, orderBy: { code: "asc" }, select: { id: true, code: true, name: true } }) : Promise.resolve([]),
+  ]));
   const open = years.some((year) => year.status === "OPEN");
   const format = (date: Date) => new Intl.DateTimeFormat("fa-IR", { dateStyle: "long", timeZone: "UTC" }).format(date);
 
@@ -34,7 +27,7 @@ export default async function FiscalYearsPage() {
           return <article key={year.id} className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{year.name}</h3><span className={year.status === "OPEN" ? "rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800" : "rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700"}>{year.status === "OPEN" ? "باز" : "بسته"}</span></div><p className="mt-3 text-sm leading-7 text-slate-600">از {format(year.startDate)} تا {format(year.endDate)}</p>
             {closing && result !== null && <ClosingResult closing={{ id: closing.id, targetYear: closing.targetYear, result, entries: { temporary: closing.temporaryEntry, permanent: closing.permanentEntry, opening: closing.openingEntry } }} />}
             {year.status === "CLOSED" && !closing && <p className="mt-4 text-sm leading-7 text-slate-500">این سال بدون عملیات انتقال مانده بسته شده است.</p>}
-            {year.status === "OPEN" && member.role === "ADMIN" && <><ClosingPanel year={{ id: year.id, name: year.name, endDate: year.endDate.toISOString().slice(0, 10) }} accounts={equityAccounts} storageKey={`hesaba-fiscal-close:${session.user.id}:${member.organizationId}:${year.id}`} /><CloseYearButton id={year.id} name={year.name} /></>}
+            {year.status === "OPEN" && member.role === "ADMIN" && <><ClosingPanel year={{ id: year.id, name: year.name, endDate: year.endDate.toISOString().slice(0, 10) }} accounts={equityAccounts} storageKey={`hesaba-fiscal-close:${member.userId}:${member.organizationId}:${year.id}`} /><CloseYearButton id={year.id} name={year.name} /></>}
           </article>;
         })}</div>}
       </section>

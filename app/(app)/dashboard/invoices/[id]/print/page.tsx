@@ -1,10 +1,8 @@
 import Link from "next/link";
-import { headers } from "next/headers";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
 import { invoiceFields, serializeInvoice } from "@/lib/invoice-api";
-import { prisma } from "@/lib/prisma";
+import { readOrganizationPage } from "@/lib/organization-page";
 import { DownloadPdfButton, PrintButton } from "./print-button";
 
 export const instant = false;
@@ -13,13 +11,9 @@ const quantity = (value: string) => value.replace(/(\.\d*?[1-9])0+$|\.0+$/, "$1"
 const dateFormat = new Intl.DateTimeFormat("fa-IR", { dateStyle: "long", timeZone: "UTC" });
 
 export default async function PrintInvoicePage({ params }: { params: Promise<{ id: string }> }) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/sign-in");
-  const member = await prisma.membership.findFirst({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" }, select: { organizationId: true, organization: { select: { name: true } } } });
-  if (!member) redirect("/onboarding");
   const id = z.string().cuid().safeParse((await params).id);
   if (!id.success) notFound();
-  const record = await prisma.invoice.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: invoiceFields });
+  const { member, data: record } = await readOrganizationPage((tx, member) => tx.invoice.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: invoiceFields }));
   if (!record) notFound();
   const invoice = serializeInvoice(record);
   const status = invoice.status === "DRAFT" ? "پیش‌نویس — صادر نشده" : invoice.status === "CANCELLED" ? "باطل‌شده" : "صادرشده";

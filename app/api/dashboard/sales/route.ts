@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 const persianDate = new Intl.DateTimeFormat("en-US-u-ca-persian-nu-latn", { year: "numeric", month: "numeric", timeZone: "UTC" });
@@ -14,6 +14,7 @@ export async function GET(request: Request) {
   if (!yearId.success) return Response.json({ error: "سال مالی معتبر انتخاب کنید." }, { status: 400 });
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       const year = await tx.fiscalYear.findFirst({ where: { id: yearId.data, organizationId: member.organizationId }, select: { id: true, name: true, status: true, startDate: true, endDate: true } });
       if (!year) return null;
       const days = await tx.$queryRaw<Day[]>`
@@ -50,6 +51,8 @@ export async function GET(request: Request) {
     if (!result) return Response.json({ error: "سال مالی پیدا نشد." }, { status: 404 });
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Dashboard sales failed", error);
     return Response.json({ error: "دریافت آمار فروش داشبورد انجام نشد." }, { status: 500 });
   }

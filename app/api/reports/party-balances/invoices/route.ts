@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { calculateInvoice } from "@/lib/invoice-calculation";
-import { organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 const querySchema = z.strictObject({
@@ -17,6 +17,7 @@ export async function GET(request: Request) {
   const { fiscalYearId, partyId, page, pageSize } = parsed.data;
   try {
     const report = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       const [year, party] = await Promise.all([
         tx.fiscalYear.findFirst({ where: { id: fiscalYearId, organizationId: member.organizationId }, select: { id: true, name: true, startDate: true, endDate: true, status: true } }),
         tx.party.findFirst({ where: { id: partyId, organizationId: member.organizationId }, select: { id: true, name: true, isCustomer: true, isSupplier: true, isActive: true } }),
@@ -41,6 +42,8 @@ export async function GET(request: Request) {
     if (!report) return Response.json({ error: "سال مالی یا شخص پیدا نشد." }, { status: 404 });
     return Response.json(report, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Party invoice balances report failed", error);
     return Response.json({ error: "دریافت گزارش فاکتورهای شخص انجام نشد." }, { status: 500 });
   }

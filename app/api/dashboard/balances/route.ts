@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, organizationContext, organizationContextError } from "@/lib/organization-context";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(request: Request) {
@@ -12,6 +12,7 @@ export async function GET(request: Request) {
   if (!yearId.success) return Response.json({ error: "سال مالی معتبر انتخاب کنید." }, { status: 400 });
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
       const year = await tx.fiscalYear.findFirst({ where: { id: yearId.data, organizationId: member.organizationId }, select: { id: true, name: true, status: true, startDate: true, endDate: true } });
       if (!year) return { status: 404, error: "سال مالی پیدا نشد." } as const;
       const [links, cashAccounts, customersWithoutAccount, suppliersWithoutAccount, openingCount] = await Promise.all([
@@ -45,6 +46,8 @@ export async function GET(request: Request) {
     if ("error" in result) return Response.json({ error: result.error }, { status: result.status });
     return Response.json(result.data, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Dashboard balances failed", error);
     return Response.json({ error: "دریافت شاخص‌های مانده انجام نشد." }, { status: 500 });
   }

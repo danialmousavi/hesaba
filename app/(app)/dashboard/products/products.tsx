@@ -1,5 +1,7 @@
 "use client";
 
+import { organizationFetch as fetch } from "@/lib/organization-fetch";
+
 import { useEffect, useState, type FormEvent } from "react";
 import { ProductControls } from "./product-controls";
 import { normalizeDigits, validPrice, type Product } from "./product-types";

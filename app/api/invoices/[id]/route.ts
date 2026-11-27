@@ -4,7 +4,7 @@ import { invoiceFields, invoiceInputSchema, invoiceLineInputSchema, serializeInv
 import { calculateInvoice, InvoiceCalculationError } from "@/lib/invoice-calculation";
 import { prisma } from "@/lib/prisma";
 import { isTransactionConflict } from "@/lib/prisma-errors";
-import { guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
+import { guardOrganizationRead, guardOrganizationWrite, organizationContext, organizationContextError } from "@/lib/organization-context";
 
 const editSchema = invoiceInputSchema.omit({ fiscalYearId: true, lines: true }).extend({
   revision: z.number().int().min(0).max(2147483646),
@@ -20,10 +20,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const id = z.string().cuid().safeParse((await params).id);
   if (!id.success) return Response.json({ error: "شناسه فاکتور معتبر نیست." }, { status: 400 });
   try {
-    const invoice = await prisma.invoice.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: invoiceFields });
+    const invoice = await prisma.$transaction(async (tx) => {
+      await guardOrganizationRead(tx, member);
+      return tx.invoice.findFirst({ where: { id: id.data, organizationId: member.organizationId }, select: invoiceFields });
+    }, { isolationLevel: "RepeatableRead" });
     if (!invoice) return Response.json({ error: "فاکتور پیدا نشد." }, { status: 404 });
     return Response.json({ invoice: serializeInvoice(invoice) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const contextError = organizationContextError(error);
+    if (contextError) return contextError;
     console.error("Invoice lookup failed", error);
     return Response.json({ error: "دریافت فاکتور انجام نشد." }, { status: 500 });
   }
